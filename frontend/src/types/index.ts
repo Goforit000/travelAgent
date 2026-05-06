@@ -118,8 +118,7 @@ export interface TripFormData {
   accommodation: string
   preferences: string[]
   free_text_input: string
-  /** 用户期望的预算上限（可选） */
-  target_budget?: number
+  target_budget: number
 }
 
 export interface TripPlanResponse {

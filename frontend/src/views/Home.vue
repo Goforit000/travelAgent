@@ -96,6 +96,7 @@
             <span class="section-title">偏好设置</span>
           </div>
 
+          <!-- 第一行：交通方式 + 住宿偏好 + 预算 -->
           <a-row :gutter="24">
             <a-col :span="8">
               <a-form-item name="transportation">
@@ -124,6 +125,36 @@
               </a-form-item>
             </a-col>
             <a-col :span="8">
+              <a-form-item name="target_budget">
+                <template #label>
+                  <span class="form-label">总预算上限</span>
+                </template>
+                <div class="budget-slider-wrapper">
+                  <a-slider
+                    v-model:value="formData.target_budget"
+                    :min="0"
+                    :max="20000"
+                    :step="100"
+                    :marks="budgetMarks"
+                    class="budget-slider"
+                  />
+                  <div class="budget-display">
+                    <template v-if="formData.target_budget <= 19900">
+                      <span class="budget-value">¥{{ formData.target_budget.toLocaleString() }}</span>
+                      <span class="budget-hint"></span>
+                    </template>
+                    <template v-else>
+                      <span class="budget-value">不限</span>
+                    </template>
+                  </div>
+                </div>
+              </a-form-item>
+            </a-col>
+          </a-row>
+
+          <!-- 第二行：旅行偏好（独立一行，左对齐） -->
+          <a-row :gutter="24">
+            <a-col :span="24">
               <a-form-item name="preferences">
                 <template #label>
                   <span class="form-label">旅行偏好</span>
@@ -233,8 +264,18 @@ const formData = reactive<Omit<TripFormData, 'start_date' | 'end_date'> & { star
   transportation: '公共交通',
   accommodation: '经济型酒店',
   preferences: [],
-  free_text_input: ''
+  free_text_input: '',
+  target_budget: 5000,
 })
+
+// 预算滑块刻度
+const budgetMarks: Record<number, string> = {
+  0: '0',
+  5000: '5k',
+  10000: '1万',
+  15000: '1.5万',
+  20000: '不限',
+}
 
 // 图标映射
 const agentIcons: Record<string, string> = {
@@ -286,7 +327,9 @@ const handleSubmit = async () => {
     transportation: formData.transportation,
     accommodation: formData.accommodation,
     preferences: formData.preferences,
-    free_text_input: formData.free_text_input
+    free_text_input: formData.free_text_input,
+    // 不限制预算时传 0（后端判为无上限）
+    target_budget: formData.target_budget >= 20000 ? 0 : formData.target_budget,
   }
 
   await generateTripStream(requestData, {
@@ -575,24 +618,24 @@ const handleSubmit = async () => {
 .preference-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 40px;
 }
 
 .custom-checkbox-group {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 40px;
   width: 100%;
 }
 
 .preference-tag :deep(.ant-checkbox-wrapper) {
   margin: 0 !important;
-  padding: 8px 16px;
+  padding: 10px 20px;
   border: 2px solid #e8e8e8;
-  border-radius: 20px;
+  border-radius: 22px;
   transition: all 0.3s ease;
   background: white;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .preference-tag :deep(.ant-checkbox-wrapper:hover) {
@@ -604,6 +647,47 @@ const handleSubmit = async () => {
   border-color: #667eea;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+}
+
+/* 预算滑块 */
+.budget-slider-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: 40px;
+}
+
+.budget-slider {
+  flex: 1;
+}
+
+.budget-slider :deep(.ant-slider-rail) {
+  background-color: #e8e8e8;
+}
+
+.budget-slider :deep(.ant-slider-track) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.budget-slider :deep(.ant-slider-handle) {
+  border-color: #667eea;
+}
+
+.budget-display {
+  min-width: 100px;
+  text-align: right;
+}
+
+.budget-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.budget-hint {
+  font-size: 13px;
+  color: #999;
+  margin-left: 2px;
 }
 
 /* 自定义文本域 */
