@@ -1,280 +1,414 @@
 """
-LangGraph 节点函数 — 工作流的 6 个步骤
+LangGraph 节点函数 — 将 Agent 包装为 StateGraph 可调用的节点
 
-每个节点都是一个纯函数：
-- 输入：TripState（当前的完整状态）
-- 输出：dict（只包含需要更新的字段，LangGraph 会自动合并回 State）
+P1 优化变更：
+- 新增 data_collection_node：并行运行 POI + Weather + Hotel，减少 4 次 Supervisor 调用
+- planner_node → budget_node 链式执行（workflow 层处理），中间不回 Supervisor
+- Supervisor 仅在 3 个阶段切换点介入：collect → plan → finalize
 
-节点之间不直接调用，而是通过 State 传递数据。
-这样每个节点都可以单独测试，互不依赖。
-
-执行顺序：
-search_attractions → query_weather → search_hotels → plan_itinerary → parse_output → fetch_photos
+拓扑结构（优化后）：
+  initialize → supervisor → (条件路由)
+    ├─ "collect"  → data_collection_node → supervisor
+    ├─ "plan"     → planner_node → budget_node → supervisor
+    └─ "finalize" → finalize_node → END
 """
 
 import json
-from langchain_core.messages import SystemMessage, HumanMessage
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.graph.state import TripState
-from app.tools.amap import search_pois, get_weather
-from app.tools.llm import get_chat_model
 from app.tools.unsplash import get_photo_url
 
+# ——— Agent 实例（模块级单例）———
+from app.agents.supervisor import SupervisorAgent
+from app.agents.poi_agent import POIAgent
+from app.agents.weather_agent import WeatherAgent
+from app.agents.hotel_agent import HotelAgent
+from app.agents.planner_agent import PlannerAgent
+from app.agents.budget_agent import BudgetAgent
 
-# ============================================================
-# 节点 1：搜索景点
-# ============================================================
-
-def search_attractions(state: TripState) -> dict:
-    """
-    从高德地图搜索景点
-
-    读取：state["request"] 里的 city 和 preferences
-    写入：state["raw_attractions"]
-    """
-    request = state["request"]
-
-    # 用第一个偏好作为关键词，没有偏好就搜"景点"
-    keywords = request.preferences[0] if request.preferences else "景点"
-
-    print(f"📍 搜索景点: city={request.city}, keywords={keywords}")
-    results = search_pois(keywords=keywords, city=request.city)
-    print(f"   找到 {len(results)} 个景点")
-
-    return {"raw_attractions": results}
+_supervisor = SupervisorAgent()
+_poi_agent = POIAgent()
+_weather_agent = WeatherAgent()
+_hotel_agent = HotelAgent()
+_planner_agent = PlannerAgent()
+_budget_agent = BudgetAgent()
 
 
 # ============================================================
-# 节点 2：查询天气
+# 节点 0：初始化
 # ============================================================
 
-def query_weather(state: TripState) -> dict:
-    """
-    从高德地图查询天气
-
-    读取：state["request"] 里的 city
-    写入：state["raw_weather"]
-    """
-    request = state["request"]
-
-    print(f"🌤️ 查询天气: city={request.city}")
-    results = get_weather(city=request.city)
-    print(f"   获取 {len(results)} 天天气数据")
-
-    return {"raw_weather": results}
-
-
-# ============================================================
-# 节点 3：搜索酒店
-# ============================================================
-
-def search_hotels(state: TripState) -> dict:
-    """
-    从高德地图搜索酒店
-
-    读取：state["request"] 里的 city 和 accommodation
-    写入：state["raw_hotels"]
-
-    注意：复用 search_pois，只是 keywords 不同
-    """
-    request = state["request"]
-
-    # 用住宿偏好作为关键词，如 "经济型酒店"
-    keywords = request.accommodation if request.accommodation else "酒店"
-
-    print(f"🏨 搜索酒店: city={request.city}, keywords={keywords}")
-    results = search_pois(keywords=keywords, city=request.city)
-    print(f"   找到 {len(results)} 个酒店")
-
-    return {"raw_hotels": results}
-
-
-# ============================================================
-# 节点 4：LLM 生成行程计划
-# ============================================================
-
-PLANNER_SYSTEM_PROMPT = """你是一位专业的旅行规划师。请根据提供的景点、天气和酒店信息，生成详细的旅行计划。
-
-请严格按照以下 JSON 格式返回，不要添加任何其他文字：
-
-```json
-{
-  "city": "城市名",
-  "start_date": "YYYY-MM-DD",
-  "end_date": "YYYY-MM-DD",
-  "days": [
-    {
-      "date": "YYYY-MM-DD",
-      "day_index": 0,
-      "description": "当天行程概述",
-      "transportation": "交通方式",
-      "accommodation": "住宿类型",
-      "hotel": {
-        "name": "酒店名", "address": "地址",
-        "location": {"longitude": 116.397, "latitude": 39.916},
-        "price_range": "300-500元", "rating": "4.5",
-        "distance": "距景点2公里", "type": "酒店类型", "estimated_cost": 400
-      },
-      "attractions": [
-        {
-          "name": "景点名", "address": "地址",
-          "location": {"longitude": 116.397, "latitude": 39.916},
-          "visit_duration": 120, "description": "描述",
-          "category": "类别", "ticket_price": 60
+def initialize_node(state: TripState) -> dict:
+    """工作流入口节点 — 设置初始状态"""
+    request = state.get("request")
+    if request is None:
+        return {
+            "error": "缺少 request 参数",
+            "phase": "done",
+            "next_agent": "finalize",
         }
-      ],
-      "meals": [
-        {"type": "breakfast", "name": "早餐", "description": "描述", "estimated_cost": 30},
-        {"type": "lunch", "name": "午餐", "description": "描述", "estimated_cost": 50},
-        {"type": "dinner", "name": "晚餐", "description": "描述", "estimated_cost": 80}
-      ]
+
+    city = getattr(request, "city", "")
+    travel_days = getattr(request, "travel_days", 0)
+
+    print(f"\n{'=' * 60}")
+    print(f"🚀 初始化旅行规划: {city} {travel_days} 天")
+    print(f"{'=' * 60}")
+
+    return {
+        "phase": "collect",
+        "next_agent": "",
+        "last_agent": "",
+        "retry_count": 0,
+        "iteration_count": 0,
+        "max_iterations": 15,  # P1 优化：减少迭代上限（Supervisor 调用减少）
+        "error": "",
+        "agent_outputs": {},
+        "raw_attractions": state.get("raw_attractions", []),
+        "raw_weather": state.get("raw_weather", []),
+        "raw_hotels": state.get("raw_hotels", []),
+        "raw_plan_text": state.get("raw_plan_text", ""),
+        "trip_plan": state.get("trip_plan"),
+        "attraction_photos": state.get("attraction_photos", {}),
     }
-  ],
-  "weather_info": [
-    {
-      "date": "YYYY-MM-DD", "day_weather": "晴", "night_weather": "多云",
-      "day_temp": 25, "night_temp": 15, "wind_direction": "南风", "wind_power": "1-3级"
-    }
-  ],
-  "overall_suggestions": "总体建议",
-  "budget": {
-    "total_attractions": 180, "total_hotels": 1200,
-    "total_meals": 480, "total_transportation": 200, "total": 2060
-  }
-}
-```
-
-要求：
-1. 每天安排 2-3 个景点，优先使用提供的真实景点数据
-2. 每天包含早中晚三餐
-3. 景点的经纬度必须使用提供的真实数据，不要编造
-4. 天气信息使用提供的真实数据
-5. 温度必须是纯数字，不带单位
-6. 必须包含预算信息"""
-
-
-def plan_itinerary(state: TripState) -> dict:
-    """
-    调用 LLM 生成完整行程
-
-    读取：state 里的 request + raw_attractions + raw_weather + raw_hotels
-    写入：state["raw_plan_text"]
-
-    这个节点做的事情：
-    1. 把前三个节点收集的数据组装成一个大 prompt
-    2. 调用 LLM 让它生成 JSON 格式的行程
-    3. 把 LLM 返回的原始文本存入 State
-    """
-    request = state["request"]
-    attractions = state["raw_attractions"]
-    weather = state["raw_weather"]
-    hotels = state["raw_hotels"]
-
-    # 组装给 LLM 的 prompt
-    user_prompt = f"""请为以下旅行需求生成详细行程：
-
-**基本信息：**
-- 城市：{request.city}
-- 日期：{request.start_date} 至 {request.end_date}
-- 天数：{request.travel_days} 天
-- 交通：{request.transportation}
-- 住宿：{request.accommodation}
-- 偏好：{', '.join(request.preferences) if request.preferences else '无'}
-
-**搜索到的景点（请优先使用这些真实数据）：**
-{json.dumps(attractions, ensure_ascii=False, indent=2)}
-
-**天气预报：**
-{json.dumps(weather, ensure_ascii=False, indent=2)}
-
-**搜索到的酒店：**
-{json.dumps(hotels, ensure_ascii=False, indent=2)}
-"""
-
-    if request.free_text_input:
-        user_prompt += f"\n**用户额外要求：** {request.free_text_input}"
-
-    print(f"📋 调用 LLM 生成行程计划...")
-
-    model = get_chat_model()
-    response = model.invoke([
-        SystemMessage(content=PLANNER_SYSTEM_PROMPT),
-        HumanMessage(content=user_prompt),
-    ])
-
-    raw_text = response.content
-    print(f"   LLM 返回 {len(raw_text)} 字符")
-
-    return {"raw_plan_text": raw_text}
 
 
 # ============================================================
-# 节点 5：解析 LLM 输出
+# 节点 1：Supervisor
 # ============================================================
 
-def parse_output(state: TripState) -> dict:
+def supervisor_node(state: TripState) -> dict:
     """
-    将 LLM 返回的文本解析为结构化的 TripPlan
+    Supervisor 节点 — 阶段级路由决策
 
-    读取：state["raw_plan_text"] + state["request"]
-    写入：state["trip_plan"] 或 state["error"]
+    P1 优化：Supervisor 只在 3 个阶段切换点被调用：
+    1. 工作流开始 → 决定 "collect"
+    2. 数据收集完成 → 决定 "plan"
+    3. 规划+预算完成 → 决定 "finalize"
+    """
+    return _supervisor.run(state)
 
-    LLM 返回的文本可能有三种情况：
-    1. ```json ... ```  代码块包裹
-    2. 直接就是 JSON
-    3. JSON 混在其他文字中间
-    所以需要逐一尝试提取
+
+# ============================================================
+# 节点 2：数据收集（P1 新增 — 并行 POI + Weather + Hotel）
+# ============================================================
+
+def data_collection_node(state: TripState) -> dict:
+    """
+    数据收集节点 — 并行运行 POI、Weather、Hotel 三个 Agent
+
+    P1 优化核心：
+    - 三个 Agent 之间无数据依赖（都只需要 request.city）
+    - 用 ThreadPoolExecutor 并行执行，总耗时 = max(单 Agent 耗时) 而非 sum
+    - 三个 Agent 全部完成后，汇总结果一次性返回给 Supervisor
+    - 避免了中间 4 次 Supervisor 调用（原来每个 Agent 前后各一次）
+
+    错误处理：
+    - 单个 Agent 失败不影响其他 Agent 继续执行
+    - 所有失败信息汇总到 error 字段，Supervisor 据此决定降级策略
+    """
+    print(f"\n{'=' * 60}")
+    print(f"📦 [data_collection_node] 并行数据收集开始 (POI + Weather + Hotel)")
+    print(f"{'=' * 60}")
+
+    results: dict = {
+        "raw_attractions": state.get("raw_attractions", []),
+        "raw_weather": state.get("raw_weather", []),
+        "raw_hotels": state.get("raw_hotels", []),
+        "agent_outputs": dict(state.get("agent_outputs", {})),
+        "error": "",
+    }
+    errors: list[str] = []
+
+    # 定义三个 Agent 的执行函数（捕获异常到返回值中）
+    def run_poi():
+        try:
+            print(f"  📍 POI Agent 开始...")
+            return _poi_agent.run(state)
+        except Exception as e:
+            print(f"  ❌ POI Agent 异常: {e}")
+            return {"error": f"POI Agent: {e}", "agent_outputs": {"poi_agent": f"失败: {e}"}}
+
+    def run_weather():
+        try:
+            print(f"  🌤️ Weather Agent 开始...")
+            return _weather_agent.run(state)
+        except Exception as e:
+            print(f"  ❌ Weather Agent 异常: {e}")
+            return {"error": f"Weather Agent: {e}", "agent_outputs": {"weather_agent": f"失败: {e}"}}
+
+    def run_hotel():
+        try:
+            print(f"  🏨 Hotel Agent 开始...")
+            return _hotel_agent.run(state)
+        except Exception as e:
+            print(f"  ❌ Hotel Agent 异常: {e}")
+            return {"error": f"Hotel Agent: {e}", "agent_outputs": {"hotel_agent": f"失败: {e}"}}
+
+    # 并行执行
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(run_poi): "poi",
+            executor.submit(run_weather): "weather",
+            executor.submit(run_hotel): "hotel",
+        }
+
+        for future in as_completed(futures):
+            agent_name = futures[future]
+            try:
+                agent_result = future.result()
+
+                # 合并 agent_outputs
+                if "agent_outputs" in agent_result:
+                    results["agent_outputs"].update(agent_result["agent_outputs"])
+
+                # 合并数据
+                if agent_name == "poi" and "raw_attractions" in agent_result:
+                    results["raw_attractions"] = agent_result["raw_attractions"]
+                    count = len(agent_result["raw_attractions"])
+                    print(f"  ✅ POI Agent 完成: {count} 个景点")
+
+                elif agent_name == "weather" and "raw_weather" in agent_result:
+                    results["raw_weather"] = agent_result["raw_weather"]
+                    count = len(agent_result["raw_weather"])
+                    print(f"  ✅ Weather Agent 完成: {count} 天天气")
+
+                elif agent_name == "hotel" and "raw_hotels" in agent_result:
+                    results["raw_hotels"] = agent_result["raw_hotels"]
+                    count = len(agent_result["raw_hotels"])
+                    print(f"  ✅ Hotel Agent 完成: {count} 个酒店")
+
+                # 收集错误
+                if agent_result.get("error"):
+                    errors.append(agent_result["error"])
+
+            except Exception as e:
+                print(f"  ❌ {agent_name} 线程异常: {e}")
+                errors.append(f"{agent_name}: {e}")
+
+    # 汇总错误
+    if errors:
+        results["error"] = "; ".join(errors)
+        print(f"  ⚠️ 数据收集阶段错误: {results['error']}")
+
+    total_attractions = len(results["raw_attractions"])
+    total_hotels = len(results["raw_hotels"])
+    total_weather = len(results["raw_weather"])
+
+    print(f"  📊 收集汇总: {total_attractions} 景点, {total_weather} 天天气, {total_hotels} 酒店")
+    print(f"{'=' * 60}\n")
+
+    return results
+
+
+# ============================================================
+# 节点 3-4：规划 + 预算（链式执行，中间不回 Supervisor）
+# ============================================================
+
+def planner_node(state: TripState) -> dict:
+    """
+    Planner Agent 节点 — 生成行程计划
+
+    注意：此节点完成后不返回 Supervisor，由 workflow 层直接链到 budget_node。
+    """
+    print(f"\n📋 [planner_node] 激活 Planner Agent")
+    try:
+        result = _planner_agent.run(state)
+        result["error"] = ""
+        result["retry_count"] = 0
+        return result
+    except Exception as e:
+        error_msg = f"Planner Agent 执行异常: {str(e)}"
+        print(f"❌ [planner_node] {error_msg}")
+        return {
+            "error": error_msg,
+            "last_agent": "planner",
+            "agent_outputs": {"planner_agent": f"执行失败: {str(e)}"},
+        }
+
+
+def budget_node(state: TripState) -> dict:
+    """
+    Budget Agent 节点 — 计算预算
+
+    此节点是 planner → budget → supervisor 链的最后一环，
+    完成后返回 Supervisor 做最终决策。
+    """
+    print(f"\n💰 [budget_node] 激活 Budget Agent")
+    try:
+        result = _budget_agent.run(state)
+        result["error"] = ""
+        result["retry_count"] = 0
+        return result
+    except Exception as e:
+        error_msg = f"Budget Agent 执行异常: {str(e)}"
+        print(f"❌ [budget_node] {error_msg}")
+        return {
+            "error": error_msg,
+            "last_agent": "budget",
+            "agent_outputs": {"budget_agent": f"执行失败: {str(e)}"},
+        }
+
+
+# ============================================================
+# 节点 5：保留的单 Agent 节点（用于错误重试时单独重跑）
+# ============================================================
+
+def poi_node(state: TripState) -> dict:
+    """POI Agent 节点（用于错误重试时单独调用）"""
+    print(f"\n📍 [poi_node] 激活 POI Agent (重试)")
+    try:
+        result = _poi_agent.run(state)
+        result["error"] = ""
+        result["retry_count"] = 0
+        return result
+    except Exception as e:
+        return {
+            "error": f"POI Agent: {str(e)}",
+            "last_agent": "poi",
+            "agent_outputs": {"poi_agent": f"重试失败: {str(e)}"},
+        }
+
+
+def weather_node(state: TripState) -> dict:
+    """Weather Agent 节点（用于错误重试时单独调用）"""
+    print(f"\n🌤️ [weather_node] 激活 Weather Agent (重试)")
+    try:
+        result = _weather_agent.run(state)
+        result["error"] = ""
+        result["retry_count"] = 0
+        return result
+    except Exception as e:
+        return {
+            "error": f"Weather Agent: {str(e)}",
+            "last_agent": "weather",
+            "agent_outputs": {"weather_agent": f"重试失败: {str(e)}"},
+        }
+
+
+def hotel_node(state: TripState) -> dict:
+    """Hotel Agent 节点（用于错误重试时单独调用）"""
+    print(f"\n🏨 [hotel_node] 激活 Hotel Agent (重试)")
+    try:
+        result = _hotel_agent.run(state)
+        result["error"] = ""
+        result["retry_count"] = 0
+        return result
+    except Exception as e:
+        return {
+            "error": f"Hotel Agent: {str(e)}",
+            "last_agent": "hotel",
+            "agent_outputs": {"hotel_agent": f"重试失败: {str(e)}"},
+        }
+
+
+# ============================================================
+# 节点 6：Finalize — 最终处理
+# ============================================================
+
+def finalize_node(state: TripState) -> dict:
+    """
+    最终处理节点 — 解析行程 → 配图 → 全局兜底
+
+    这是用户请求的最后一道保障：无论前面多少个 Agent 失败，
+    这个节点必须保证返回一个可用的 TripPlan。
     """
     from app.schemas.models import TripPlan, DayPlan, Attraction, Meal, Location
 
-    raw_text = state["raw_plan_text"]
-    request = state["request"]
+    print(f"\n{'=' * 60}")
+    print(f"🏁 [finalize_node] 最终处理开始")
+    print(f"{'=' * 60}")
 
-    try:
-        # 尝试提取 JSON
-        json_str = _extract_json(raw_text)
-        data = json.loads(json_str)
+    trip_plan = state.get("trip_plan")
+    raw_plan_text = state.get("raw_plan_text", "")
+    error = state.get("error", "")
+    attraction_photos = state.get("attraction_photos", {})
 
-        # 用 Pydantic 模型验证和转换
-        trip_plan = TripPlan(**data)
-        print(f"✅ 行程解析成功: {len(trip_plan.days)} 天")
+    # ——— 步骤 1：解析行程 ———
+    if trip_plan is None and raw_plan_text:
+        try:
+            json_str = _extract_json(raw_plan_text)
+            data = json.loads(json_str)
+            trip_plan = TripPlan(**data)
+            print(f"  ✅ 行程解析成功: {len(trip_plan.days)} 天")
+        except Exception as e:
+            print(f"  ⚠️ 行程解析失败: {e}，使用备用计划")
+            trip_plan = None
 
-        return {"trip_plan": trip_plan, "error": ""}
+    # ——— 步骤 2：兜底 ———
+    if trip_plan is None:
+        request = state.get("request")
+        if request is not None:
+            trip_plan = _create_fallback_plan(request)
+            error = (error + "; " if error else "") + "使用备用计划"
+            print(f"  🔄 已生成备用计划")
+        else:
+            error = "无法生成旅行计划：缺少 request"
 
-    except Exception as e:
-        print(f"⚠️ 解析失败: {e}，使用备用计划")
+    # ——— 步骤 3：配图 ———
+    if trip_plan is not None:
+        new_photos: dict[str, str] = {}
+        for day in trip_plan.days:
+            for attraction in day.attractions:
+                if attraction.image_url:
+                    continue
+                name = attraction.name
+                query = f"{name} {trip_plan.city} China landmark"
+                print(f"  📷 搜索图片: {name}")
+                url = get_photo_url(query)
+                if url:
+                    attraction.image_url = url
+                    new_photos[name] = url
+                    print(f"     ✅ 找到图片")
+                else:
+                    print(f"     ⚠️ 未找到图片")
 
-        # 生成备用计划
-        fallback = _create_fallback_plan(request)
-        return {"trip_plan": fallback, "error": f"LLM 输出解析失败: {str(e)}"}
+        if new_photos:
+            attraction_photos = {**attraction_photos, **new_photos}
 
+    print(f"{'=' * 60}")
+    print(f"🏁 [finalize_node] 完成")
+    print(f"{'=' * 60}\n")
+
+    return {
+        "trip_plan": trip_plan,
+        "attraction_photos": attraction_photos,
+        "error": error,
+        "phase": "done",
+        "next_agent": "",
+    }
+
+
+# ============================================================
+# 辅助函数
+# ============================================================
 
 def _extract_json(text: str) -> str:
-    """从 LLM 返回的文本中提取 JSON 字符串"""
-
-    # 情况1：```json ... ``` 代码块
+    """从文本中提取 JSON 字符串"""
     if "```json" in text:
         start = text.find("```json") + 7
         end = text.find("```", start)
-        return text[start:end].strip()
+        if end > start:
+            return text[start:end].strip()
 
-    # 情况2：``` ... ``` 代码块（没有 json 标记）
     if "```" in text:
         start = text.find("```") + 3
         end = text.find("```", start)
-        return text[start:end].strip()
+        if end > start:
+            return text[start:end].strip()
 
-    # 情况3：直接找 { ... }
     if "{" in text and "}" in text:
         start = text.find("{")
         end = text.rfind("}") + 1
-        return text[start:end]
+        if end > start:
+            return text[start:end]
 
     raise ValueError("文本中未找到 JSON 数据")
 
 
 def _create_fallback_plan(request) -> "TripPlan":
-    """当 LLM 输出解析失败时，生成一个基本的备用计划"""
-    from datetime import datetime, timedelta
+    """当所有 Agent 均失败时，生成备用计划"""
     from app.schemas.models import TripPlan, DayPlan, Attraction, Meal, Location
 
     start = datetime.strptime(request.start_date, "%Y-%m-%d")
@@ -285,18 +419,18 @@ def _create_fallback_plan(request) -> "TripPlan":
         days.append(DayPlan(
             date=current.strftime("%Y-%m-%d"),
             day_index=i,
-            description=f"第{i + 1}天行程",
+            description=f"第{i + 1}天：探索{request.city}",
             transportation=request.transportation,
             accommodation=request.accommodation,
             attractions=[
                 Attraction(
-                    name=f"{request.city}景点{j + 1}",
+                    name=f"{request.city}热门景点{j + 1}",
                     address=f"{request.city}市",
-                    location=Location(longitude=116.4 + j * 0.01, latitude=39.9 + j * 0.01),
+                    location=Location(longitude=116.40 + j * 0.02, latitude=39.90 + j * 0.02),
                     visit_duration=120,
-                    description=f"{request.city}的热门景点",
+                    description=f"{request.city}的推荐游览地点",
                 )
-                for j in range(2)
+                for j in range(3)
             ],
             meals=[
                 Meal(type="breakfast", name="当地早餐", estimated_cost=30),
@@ -310,48 +444,9 @@ def _create_fallback_plan(request) -> "TripPlan":
         start_date=request.start_date,
         end_date=request.end_date,
         days=days,
-        overall_suggestions=f"这是{request.city}{request.travel_days}日游的备用行程，建议提前查看各景点开放时间。",
+        overall_suggestions=(
+            f"这是{request.city}{request.travel_days}日游的自动生成行程。"
+            f"由于智能规划过程遇到问题，此行程为备用方案。建议提前查看各景点开放时间，"
+            f"并根据实际天气情况调整出行计划。"
+        ),
     )
-
-
-# ============================================================
-# 节点 6：为景点配图
-# ============================================================
-
-def fetch_photos(state: TripState) -> dict:
-    """
-    用 Unsplash 为每个景点搜索一张配图
-
-    读取：state["trip_plan"]（从 parse_output 拿到的结构化计划）
-    写入：直接修改 trip_plan 里每个 attraction 的 image_url
-
-    为什么放在 parse_output 之后？
-    - 必须先有结构化的景点列表，才知道要搜哪些图
-    - 图片是锦上添花，即使 Unsplash 挂了也不影响核心功能
-
-    为什么不在 plan_itinerary 之前搜图？
-    - LLM 不需要图片来规划行程，提前搜浪费时间
-    """
-    trip_plan = state.get("trip_plan")
-    if not trip_plan:
-        return {"attraction_photos": {}}
-
-    photos = {}
-    for day in trip_plan.days:
-        for attraction in day.attractions:
-            if attraction.image_url:
-                # 已经有图片了，跳过
-                continue
-
-            query = f"{attraction.name} {trip_plan.city} China landmark"
-            print(f"📷 搜索图片: {attraction.name}")
-            url = get_photo_url(query)
-
-            if url:
-                attraction.image_url = url
-                photos[attraction.name] = url
-                print(f"   ✅ 找到图片")
-            else:
-                print(f"   ⚠️ 未找到图片")
-
-    return {"trip_plan": trip_plan, "attraction_photos": photos}

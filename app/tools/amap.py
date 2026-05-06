@@ -1,43 +1,47 @@
 """
-高德地图工具 — 纯 HTTP 调用，不依赖任何 Agent 框架
+高德地图工具 — 封装高德地图 Web API，同时提供底层函数和 @tool 装饰的 Agent 工具
 
-职责：封装高德地图 Web API，提供两个能力：
-1. search_pois()  — 关键词搜索 POI（景点、酒店、餐厅都能搜）
-2. get_weather()  — 查询城市天气预报
+底层函数（供代码直接调用）：
+- search_pois()  : 关键词搜索 POI
+- get_weather()  : 查询城市天气预报
 
-为什么用 httpx 而不是 requests？
-- httpx 支持 async，后续如果 FastAPI 用 async 路由可以无缝切换
-- 但当前我们用同步版本（httpx.get），保持简单
-
-为什么不用原项目的 MCP 协议？
-- MCP 需要启动一个子进程服务器（uvx amap-mcp-server），增加复杂度
-- 高德地图本身就是 REST API，直接 HTTP 调用更简单、更可控
+@tool 装饰的工具（供 Agent ReAct 循环中的 LLM Tool Calling 调用）：
+- search_attractions_tool : 搜索景点
+- search_hotels_tool      : 搜索酒店
+- query_weather_tool      : 查询天气
 """
+import json
 
 import httpx
+from langchain_core.tools import tool
 from app.config import settings
-
 
 # 高德地图 Web API 的基础地址
 AMAP_BASE_URL = "https://restapi.amap.com/v3"
 
 
-def search_pois(keywords: str, city: str, citylimit: bool = True) -> list[dict]:
-    """
-    搜索 POI（兴趣点）
+# ============================================================
+# 底层 HTTP 函数（供代码直接调用，不抛异常，失败返回空列表）
+# ============================================================
 
-    这个方法是通用的 —— 搜景点、搜酒店、搜餐厅都用它，只是 keywords 不同。
-    graph 层的 search_attractions 节点会传 keywords="历史文化"
-    graph 层的 search_hotels 节点会传 keywords="酒店"
+def search_pois(
+    keywords: str,
+    city: str,
+    citylimit: bool = True,
+    offset: int = 5,
+) -> list[dict]:
+    """
+    搜索 POI（兴趣点）— 通用方法，搜景点、酒店、餐厅都用它
 
     Args:
-        keywords: 搜索关键词，如 "历史文化"、"酒店"、"美食"
-        city: 城市名，如 "北京"
+        keywords: 搜索关键词，如"历史文化"、"酒店"、"美食"
+        city: 城市名，如"北京"
         citylimit: 是否限制在城市范围内搜索
+        offset: 返回数量上限（最多 20）
 
     Returns:
         POI 列表，每个 POI 是一个 dict，包含 name/address/location 等字段
-        如果调用失败返回空列表（不抛异常，让上层决定如何处理）
+        调用失败返回空列表（不抛异常，让上层决定如何处理）
     """
     try:
         resp = httpx.get(
@@ -48,7 +52,7 @@ def search_pois(keywords: str, city: str, citylimit: bool = True) -> list[dict]:
                 "city": city,
                 "citylimit": str(citylimit).lower(),
                 "output": "json",
-                "offset": 10,  # 最多返回10条
+                "offset": min(offset, 20),
             },
             timeout=10,
         )
@@ -59,10 +63,8 @@ def search_pois(keywords: str, city: str, citylimit: bool = True) -> list[dict]:
             print(f"⚠️ 高德POI搜索失败: {data.get('info', 'unknown error')}")
             return []
 
-        # 提取有用字段，统一格式
         pois = []
         for item in data.get("pois", []):
-            # 高德返回的 location 是 "116.397128,39.916527" 格式的字符串
             loc_str = item.get("location", "")
             lng, lat = 0.0, 0.0
             if loc_str and "," in loc_str:
@@ -92,11 +94,11 @@ def get_weather(city: str) -> list[dict]:
     查询城市天气预报
 
     Args:
-        city: 城市名或城市编码，如 "北京"
+        city: 城市名或城市编码，如"北京"、"110000"
 
     Returns:
-        天气预报列表（最多4天），每条包含 date/day_weather/night_weather/temps 等
-        如果失败返回空列表
+        天气预报列表，每条包含 date/day_weather/night_weather/temps 等
+        调用失败返回空列表
     """
     try:
         resp = httpx.get(
@@ -104,7 +106,7 @@ def get_weather(city: str) -> list[dict]:
             params={
                 "key": settings.amap_api_key,
                 "city": city,
-                "extensions": "all",  # "all" 返回预报，"base" 只返回实况
+                "extensions": "all",
                 "output": "json",
             },
             timeout=10,
@@ -116,7 +118,6 @@ def get_weather(city: str) -> list[dict]:
             print(f"⚠️ 高德天气查询失败: {data.get('info', 'unknown error')}")
             return []
 
-        # 从 forecasts 里提取每日天气
         forecasts = data.get("forecasts", [])
         if not forecasts:
             return []
@@ -139,3 +140,99 @@ def get_weather(city: str) -> list[dict]:
     except Exception as e:
         print(f"❌ 高德天气查询异常: {e}")
         return []
+
+
+# ============================================================
+# @tool 装饰的 Agent 工具（供 LLM Tool Calling 使用）
+# ============================================================
+
+@tool
+def search_attractions_tool(
+    keywords: str,
+    city: str,
+    offset: int = 5,
+) -> str:
+    """
+    在高德地图中搜索景点信息。
+
+    根据给定的关键词和城市搜索景点，返回景点名称、地址、经纬度、评分等数据。
+    当需要获取某个城市的真实景点数据时调用此工具。
+
+    Args:
+        keywords: 搜索关键词，例如 "历史文化"、"自然风光"、"博物馆"、"寺庙"。
+                  如果用户有多个偏好，建议分多次调用，每次使用不同的关键词。
+        city: 目标城市名称，例如 "北京"、"上海"、"杭州"。
+        offset: 返回的景点数量上限，默认为 10，最大 20。
+
+    Returns:
+        JSON 字符串，包含景点列表。每个景点包含：
+        - name: 景点名称
+        - address: 详细地址
+        - longitude: 经度
+        - latitude: 纬度
+        - type: 景点类别
+        - rating: 评分
+        如果没有找到结果或调用失败，返回空列表的 JSON。
+    """
+    results = search_pois(keywords=keywords, city=city, offset=offset)
+    return json.dumps(results, ensure_ascii=False, indent=2)
+
+
+@tool
+def search_hotels_tool(
+    keywords: str,
+    city: str,
+    offset: int = 5,
+) -> str:
+    """
+    在高德地图中搜索酒店信息。
+
+    根据给定的住宿类型关键词和城市搜索酒店，返回酒店名称、地址、经纬度等数据。
+    当需要获取某个城市的酒店数据时调用此工具。
+
+    Args:
+        keywords: 酒店类型关键词，例如 "经济型酒店"、"舒适型酒店"、"豪华酒店"、"民宿"。
+        city: 目标城市名称，例如 "北京"、"上海"。
+        offset: 返回的酒店数量上限，默认为 10，最大 20。
+
+    Returns:
+        JSON 字符串，包含酒店列表。每个酒店包含：
+        - name: 酒店名称
+        - address: 详细地址
+        - longitude: 经度
+        - latitude: 纬度
+        - type: 酒店类型
+        - rating: 评分
+        如果没有找到结果或调用失败，返回空列表的 JSON。
+    """
+    results = search_pois(keywords=keywords, city=city, offset=offset)
+    return json.dumps(results, ensure_ascii=False, indent=2)
+
+
+@tool
+def query_weather_tool(
+    city: str,
+) -> str:
+    """
+    查询指定城市的天气预报。
+
+    获取未来几天的天气信息，包括白天/夜间天气状况、温度、风向风力等。
+    当需要获取旅行目的地天气信息时调用此工具。
+
+    Args:
+        city: 目标城市名称，例如 "北京"、"上海"。
+              支持中文城市名或行政区划代码（如 "110000" 代表北京）。
+
+    Returns:
+        JSON 字符串，包含天气预报列表。每天包含：
+        - date: 日期 (YYYY-MM-DD)
+        - day_weather: 白天天气（如"晴"、"多云"、"小雨"）
+        - night_weather: 夜间天气
+        - day_temp: 白天温度（字符串，可能带单位如"25"或"25°C"）
+        - night_temp: 夜间温度
+        - wind_direction: 风向（如"南风"、"北风"）
+        - wind_power: 风力等级（如"1-3级"）
+        如果查询失败，返回空列表的 JSON。
+    """
+    results = get_weather(city=city)
+    return json.dumps(results, ensure_ascii=False, indent=2)

@@ -13,7 +13,7 @@
         <span class="icon">✈️</span>
       </div>
       <h1 class="page-title">智能旅行助手</h1>
-      <p class="page-subtitle">基于AI的个性化旅行规划,让每一次出行都完美无忧</p>
+      <p class="page-subtitle">基于多agent的个性化旅行规划，让每一次出行都完美无忧</p>
     </div>
 
     <a-card class="form-card" :bordered="false">
@@ -22,7 +22,7 @@
         layout="vertical"
         @finish="handleSubmit"
       >
-        <!-- 第一步:目的地和日期 -->
+        <!-- 第一步：目的地和日期 -->
         <div class="form-section">
           <div class="section-header">
             <span class="section-icon">📍</span>
@@ -89,7 +89,7 @@
           </a-row>
         </div>
 
-        <!-- 第二步:偏好设置 -->
+        <!-- 第二步：偏好设置 -->
         <div class="form-section">
           <div class="section-header">
             <span class="section-icon">⚙️</span>
@@ -143,7 +143,7 @@
           </a-row>
         </div>
 
-        <!-- 第三步:额外要求 -->
+        <!-- 第三步：额外要求 -->
         <div class="form-section">
           <div class="section-header">
             <span class="section-icon">💬</span>
@@ -153,7 +153,7 @@
           <a-form-item name="free_text_input">
             <a-textarea
               v-model:value="formData.free_text_input"
-              placeholder="请输入您的额外要求,例如:想去看升旗、需要无障碍设施、对海鲜过敏等..."
+              placeholder="请输入您的额外要求，例如:想去看升旗、需要无障碍设施、对海鲜过敏等..."
               :rows="3"
               size="large"
               class="custom-textarea"
@@ -176,26 +176,32 @@
               <span>开始规划我的旅行</span>
             </template>
             <template v-else>
-              <span>正在生成中...</span>
+              <span>{{ loadingButtonText }}</span>
             </template>
           </a-button>
         </a-form-item>
 
-        <!-- 加载进度条 -->
+        <!-- 实时进度条（由 SSE 事件驱动） -->
         <a-form-item v-if="loading">
           <div class="loading-container">
             <a-progress
-              :percent="loadingProgress"
-              status="active"
+              :percent="progressPct"
+              :status="progressPct === 100 ? 'success' : 'active'"
               :stroke-color="{
                 '0%': '#667eea',
                 '100%': '#764ba2',
               }"
               :stroke-width="10"
             />
-            <p class="loading-status">
-              {{ loadingStatus }}
-            </p>
+            <div class="loading-detail">
+              <p class="loading-status">
+                <span class="loading-icon">{{ statusIcon }}</span>
+                {{ statusMessage }}
+              </p>
+              <p class="loading-agent" v-if="currentAgent">
+                当前阶段：{{ currentAgent }}
+              </p>
+            </div>
           </div>
         </a-form-item>
       </a-form>
@@ -207,16 +213,19 @@
 import { ref, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { generateTripPlan } from '@/services/api'
+import { generateTripStream } from '@/services/api'
 import type { TripFormData } from '@/types'
 import type { Dayjs } from 'dayjs'
 
 const router = useRouter()
 const loading = ref(false)
-const loadingProgress = ref(0)
-const loadingStatus = ref('')
+const progressPct = ref(0)
+const statusMessage = ref('')
+const statusIcon = ref('🔍')
+const currentAgent = ref('')
+const loadingButtonText = ref('正在生成中...')
 
-const formData = reactive<TripFormData & { start_date: Dayjs | null; end_date: Dayjs | null }>({
+const formData = reactive<Omit<TripFormData, 'start_date' | 'end_date'> & { start_date: Dayjs | null; end_date: Dayjs | null }>({
   city: '',
   start_date: null,
   end_date: null,
@@ -227,7 +236,20 @@ const formData = reactive<TripFormData & { start_date: Dayjs | null; end_date: D
   free_text_input: ''
 })
 
-// 监听日期变化,自动计算旅行天数
+// 图标映射
+const agentIcons: Record<string, string> = {
+  '初始化': '⚡',
+  '调度中心': '🧠',
+  '数据收集 (景点+天气+酒店)': '📦',
+  '景点搜索': '📍',
+  '天气查询': '🌤️',
+  '酒店推荐': '🏨',
+  '行程规划': '📋',
+  '预算计算': '💰',
+  '完成处理': '🏁',
+}
+
+// 监听日期变化，自动计算旅行天数
 watch([() => formData.start_date, () => formData.end_date], ([start, end]) => {
   if (start && end) {
     const days = end.diff(start, 'day') + 1
@@ -250,68 +272,87 @@ const handleSubmit = async () => {
   }
 
   loading.value = true
-  loadingProgress.value = 0
-  loadingStatus.value = '正在初始化...'
+  progressPct.value = 0
+  statusMessage.value = '正在连接服务器...'
+  statusIcon.value = '⚡'
+  currentAgent.value = ''
+  loadingButtonText.value = '正在初始化...'
 
-  // 模拟进度更新
-  const progressInterval = setInterval(() => {
-    if (loadingProgress.value < 90) {
-      loadingProgress.value += 10
-
-      // 更新状态文本
-      if (loadingProgress.value <= 30) {
-        loadingStatus.value = '🔍 正在搜索景点...'
-      } else if (loadingProgress.value <= 50) {
-        loadingStatus.value = '🌤️ 正在查询天气...'
-      } else if (loadingProgress.value <= 70) {
-        loadingStatus.value = '🏨 正在推荐酒店...'
-      } else {
-        loadingStatus.value = '📋 正在生成行程计划...'
-      }
-    }
-  }, 500)
-
-  try {
-    const requestData: TripFormData = {
-      city: formData.city,
-      start_date: formData.start_date.format('YYYY-MM-DD'),
-      end_date: formData.end_date.format('YYYY-MM-DD'),
-      travel_days: formData.travel_days,
-      transportation: formData.transportation,
-      accommodation: formData.accommodation,
-      preferences: formData.preferences,
-      free_text_input: formData.free_text_input
-    }
-
-    const response = await generateTripPlan(requestData)
-
-    clearInterval(progressInterval)
-    loadingProgress.value = 100
-    loadingStatus.value = '✅ 完成!'
-
-    if (response.success && response.data) {
-      // 保存到sessionStorage
-      sessionStorage.setItem('tripPlan', JSON.stringify(response.data))
-
-      message.success('旅行计划生成成功!')
-
-      // 短暂延迟后跳转
-      setTimeout(() => {
-        router.push('/result')
-      }, 500)
-    } else {
-      message.error(response.message || '生成失败')
-    }
-  } catch (error: any) {
-    clearInterval(progressInterval)
-    message.error(error.message || '生成旅行计划失败,请稍后重试')
-  } finally {
-    setTimeout(() => {
-      loading.value = false
-      loadingProgress.value = 0
-      loadingStatus.value = ''
-    }, 1000)
+  const requestData: TripFormData = {
+    city: formData.city,
+    start_date: formData.start_date.format('YYYY-MM-DD'),
+    end_date: formData.end_date.format('YYYY-MM-DD'),
+    travel_days: formData.travel_days,
+    transportation: formData.transportation,
+    accommodation: formData.accommodation,
+    preferences: formData.preferences,
+    free_text_input: formData.free_text_input
   }
+
+  await generateTripStream(requestData, {
+    onAgentStart: (agentName: string) => {
+      const icon = agentIcons[agentName] || '🔄'
+      statusIcon.value = icon
+      currentAgent.value = agentName
+      statusMessage.value = `正在执行 ${agentName}...`
+      loadingButtonText.value = `${agentName}中...`
+    },
+
+    onAgentEnd: (agentName: string) => {
+      console.log(`[${agentName}] 执行完成`)
+    },
+
+    onToolStart: (toolName: string, _agentName: string) => {
+      statusMessage.value = `正在调用 ${toolName}...`
+    },
+
+    onToolEnd: (_toolName: string, _agentName: string) => {
+      // 工具调用完成，静默处理
+    },
+
+    onProgress: (percent: number, msg: string) => {
+      progressPct.value = percent
+      if (msg) {
+        statusMessage.value = msg
+      }
+    },
+
+    onDone: (data: any, _msg: string) => {
+      progressPct.value = 100
+      statusMessage.value = '✅ 行程生成完成！'
+      statusIcon.value = '✅'
+      loadingButtonText.value = '完成！'
+      currentAgent.value = ''
+
+      if (data) {
+        sessionStorage.setItem('tripPlan', JSON.stringify(data))
+        message.success('旅行计划生成成功！')
+
+        setTimeout(() => {
+          loading.value = false
+          progressPct.value = 0
+          statusMessage.value = ''
+          statusIcon.value = '🔍'
+          currentAgent.value = ''
+          loadingButtonText.value = '正在生成中...'
+          router.push('/result')
+        }, 800)
+      } else {
+        message.error('服务器未返回有效数据')
+        loading.value = false
+      }
+    },
+
+    onError: (errorMsg: string) => {
+      message.error(errorMsg || '生成旅行计划失败，请稍后重试')
+      loading.value = false
+      progressPct.value = 0
+      statusMessage.value = ''
+      statusIcon.value = '🔍'
+      currentAgent.value = ''
+      loadingButtonText.value = '正在生成中...'
+    },
+  })
 }
 </script>
 
@@ -616,11 +657,25 @@ const handleSubmit = async () => {
   border: 2px dashed #667eea;
 }
 
-.loading-status {
+.loading-detail {
   margin-top: 16px;
+}
+
+.loading-status {
   color: #667eea;
   font-size: 18px;
   font-weight: 500;
+  margin: 0 0 4px 0;
+}
+
+.loading-icon {
+  margin-right: 8px;
+}
+
+.loading-agent {
+  color: #999;
+  font-size: 14px;
+  margin: 0;
 }
 
 /* 动画 */
@@ -646,4 +701,3 @@ const handleSubmit = async () => {
   }
 }
 </style>
-

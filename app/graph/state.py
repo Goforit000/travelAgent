@@ -1,19 +1,30 @@
 """
-LangGraph 状态定义 — 所有节点共享的数据结构
+LangGraph 状态定义 — 所有 Agent 共享的数据结构
 
 在 LangGraph 中，State 就像流水线上的托盘：
-- 每个节点从 State 里读取自己需要的数据
+- 每个 Agent 从 State 里读取自己需要的数据
 - 处理完后把结果写回 State
-- 下一个节点接着读
+- Supervisor 根据 State 决定下一个 Agent
 
-为什么用 TypedDict 而不是 Pydantic？
-- LangGraph 的 StateGraph 要求 State 是 TypedDict
-- TypedDict 只做类型提示，不做运行时校验（轻量）
-- 真正的数据校验在最后的 parse_output 节点里由 Pydantic 完成
+扩展说明（Multi-Agent 重构）：
+- 新增 messages 字段用于 Agent 间共享对话历史（operator.add 自动追加）
+- 新增 next_agent / last_agent 用于 Supervisor 路由决策
+- 新增 retry_count / max_iterations / iteration_count 用于循环控制
+- 新增 phase 用于标记当前工作流阶段
+- 新增 agent_outputs 用于 Supervisor 快速查阅各 Agent 输出摘要
 """
 
-from typing import TypedDict
+from typing import Annotated, TypedDict, Any
+from operator import add
+from langchain_core.messages import BaseMessage
 from app.schemas.models import TripRequest, TripPlan
+
+
+def _merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    """合并两个字典，right 的键值覆盖 left 的同名键"""
+    merged = dict(left)
+    merged.update(right)
+    return merged
 
 
 class TripState(TypedDict):
@@ -23,27 +34,47 @@ class TripState(TypedDict):
     数据流向：
     ┌─────────────────┐
     │  request         │ ← API 路由写入（用户的原始请求）
-    │  raw_attractions │ ← search_attractions 节点写入
-    │  raw_weather     │ ← query_weather 节点写入
-    │  raw_hotels      │ ← search_hotels 节点写入
-    │  raw_plan_text   │ ← plan_itinerary 节点写入（LLM 生成的原始文本）
-    │  trip_plan       │ ← parse_output 节点写入（最终结构化结果）
-    │  error           │ ← 任何节点出错时写入
+    │  messages        │ ← Agent 间共享对话历史（Annotated[str, add] 自动追加）
+    │  next_agent      │ ← Supervisor 输出的路由信号
+    │  last_agent      │ ← 上一个执行的 Agent 名称（用于重试）
+    │  retry_count     │ ← 当前步骤的重试计数
+    │  phase           │ ← 当前阶段 (collect / plan / review / done)
+    │  raw_attractions │ ← POI Agent 写入
+    │  raw_weather     │ ← Weather Agent 写入
+    │  raw_hotels      │ ← Hotel Agent 写入
+    │  raw_plan_text   │ ← Planner Agent 写入（LLM 生成的原始文本）
+    │  trip_plan       │ ← Finalize 节点写入（最终结构化结果）
+    │  agent_outputs   │ ← 各 Agent 输出摘要（Supervisor 快速查阅）
+    │  error           │ ← 任何 Agent 出错时写入
+    │  iteration_count │ ← 全局迭代计数器（防止无限循环）
+    │  max_iterations  │ ← 最大迭代次数（默认 20）
     └─────────────────┘
     """
 
-    # 输入：用户请求（API 路由在调用 graph 之前填入）
+    # ===== 输入：用户请求（API 路由在调用 graph 之前填入）=====
     request: TripRequest
 
-    # 中间结果：各节点依次填入
-    raw_attractions: list[dict]   # search_attractions → 高德返回的景点列表
-    raw_weather: list[dict]       # query_weather → 高德返回的天气列表
-    raw_hotels: list[dict]        # search_hotels → 高德返回的酒店列表
-    raw_plan_text: str            # plan_itinerary → LLM 生成的 JSON 文本
-    attraction_photos: dict       # fetch_photos → {"景点名": "图片URL"}
+    # ===== Agent 通信 =====
+    messages: Annotated[list[BaseMessage], add]
+    next_agent: str
+    last_agent: str
+    agent_outputs: Annotated[dict[str, str], _merge_dicts]
 
-    # 最终输出
-    trip_plan: TripPlan | None    # parse_output → 解析后的结构化旅行计划
+    # ===== 中间结果：各 Agent 依次填入 =====
+    raw_attractions: list[dict]
+    raw_weather: list[dict]
+    raw_hotels: list[dict]
+    raw_plan_text: str
+    attraction_photos: Annotated[dict[str, str], _merge_dicts]
 
-    # 错误信息
-    error: str                    # 出错时记录原因，不出错为空字符串
+    # ===== 最终输出 =====
+    trip_plan: TripPlan | None
+
+    # ===== 流程控制 =====
+    phase: str
+    retry_count: int
+    iteration_count: int
+    max_iterations: int
+
+    # ===== 错误信息 =====
+    error: str

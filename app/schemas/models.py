@@ -6,10 +6,14 @@
 2. 请求和响应分开：TripRequest 是前端传进来的，TripPlan 是我们返回的
 3. 每个字段都有类型 + 默认值 + 描述，Pydantic 会自动校验
 
-对照 API 文档的第 3 节阅读本文件。
+Multi-Agent 重构变更：
+- TripPlan 新增 total_budget (Optional[float]) 和 budget_details (Optional[dict])
+  供 Budget Agent 在生成过程中逐步填充
+- TripPlan 核心字段保持必填（city/start_date/end_date/days），外层字段可选
+  支持工作流渐进式构建（Planner → Validator → Budget → Finalize）
 """
 
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -94,6 +98,31 @@ class Budget(BaseModel):
     total: int = Field(default=0, description="总费用")
 
 
+class BudgetDetail(BaseModel):
+    """
+    预算明细 — Budget Agent 输出的详细分析
+
+    比 Budget 更细粒度，包含分类占比、优化建议等。
+    """
+    total_attractions: int = Field(default=0, description="门票总费用")
+    total_hotels: int = Field(default=0, description="酒店总费用")
+    total_meals: int = Field(default=0, description="餐饮总费用")
+    total_transportation: int = Field(default=0, description="交通总费用")
+    total: int = Field(default=0, description="总费用")
+    daily_breakdown: Optional[list[dict[str, Any]]] = Field(
+        default=None, description="每日费用明细"
+    )
+    savings_suggestions: Optional[list[dict[str, Any]]] = Field(
+        default=None, description="削减建议列表"
+    )
+    warnings: Optional[list[dict[str, Any]]] = Field(
+        default=None, description="预算异常警告"
+    )
+    analysis: Optional[str] = Field(
+        default=None, description="预算分析文字说明"
+    )
+
+
 # =====================================================
 # 第三层：组合类型（由上面的实体组合而成）
 # =====================================================
@@ -111,14 +140,40 @@ class DayPlan(BaseModel):
 
 
 class TripPlan(BaseModel):
-    """完整旅行计划 — 最终返回给前端的核心数据"""
+    """
+    完整旅行计划 — 最终返回给前端的核心数据
+
+    Multi-Agent 重构说明：
+    - city/start_date/end_date/days 保持必填（核心结构）
+    - weather_info/budget 为可选，支持渐进式填充
+    - total_budget/budget_details 为新增字段，由 Budget Agent 填充
+    - overall_suggestions 保持必填（finalize 节点保证兜底值）
+    """
     city: str = Field(..., description="目的地城市")
     start_date: str = Field(..., description="开始日期")
     end_date: str = Field(..., description="结束日期")
     days: list[DayPlan] = Field(..., description="每日行程")
     weather_info: list[WeatherInfo] = Field(default_factory=list, description="天气信息")
-    overall_suggestions: str = Field(..., description="总体建议")
-    budget: Optional[Budget] = Field(default=None, description="预算信息")
+    overall_suggestions: str = Field(default="", description="总体建议")
+
+    # 原有预算字段（Planner Agent 初步填充）
+    budget: Optional[Budget] = Field(default=None, description="预算汇总（初步）")
+
+    # 新增预算字段（Budget Agent 详细填充）
+    total_budget: Optional[float] = Field(
+        default=None,
+        description="总预算金额（Budget Agent 计算，精确值）",
+    )
+    budget_details: Optional[BudgetDetail] = Field(
+        default=None,
+        description="预算明细（Budget Agent 输出的完整分析，含逐日明细、削减建议、异常警告）",
+    )
+
+    # 元数据（用于调试和追踪）
+    workflow_metadata: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="工作流元数据（agent_outputs、迭代次数等，供调试使用）",
+    )
 
 
 # =====================================================
@@ -135,6 +190,10 @@ class TripRequest(BaseModel):
     accommodation: str = Field(..., description="住宿偏好")
     preferences: list[str] = Field(default_factory=list, description="偏好标签")
     free_text_input: str = Field(default="", description="额外要求")
+    target_budget: Optional[float] = Field(
+        default=None,
+        description="用户期望的预算上限（可选，Budget Agent 用于超限判断）",
+    )
 
 
 class TripPlanResponse(BaseModel):
@@ -149,3 +208,27 @@ class ErrorResponse(BaseModel):
     success: bool = Field(default=False)
     message: str = Field(..., description="错误描述")
     error_code: Optional[str] = Field(default=None, description="错误代码")
+
+
+# =====================================================
+# SSE 事件类型（供 API 路由使用）
+# =====================================================
+
+class SSEProgressEvent(BaseModel):
+    """SSE progress 事件的数据结构"""
+    percent: int = Field(..., description="进度百分比 0-100")
+    node: str = Field(default="", description="当前节点名称")
+    name: str = Field(default="", description="用户可见的阶段名称")
+    message: str = Field(default="", description="进度消息")
+
+
+class SSEAgentEvent(BaseModel):
+    """SSE agent_start / agent_end 事件的数据结构"""
+    agent: str = Field(..., description="节点内部名称（如 poi_node）")
+    name: str = Field(..., description="用户可见的 Agent 名称（如 景点搜索）")
+
+
+class SSEToolEvent(BaseModel):
+    """SSE tool_start / tool_end 事件的数据结构"""
+    tool: str = Field(..., description="工具名称")
+    agent: str = Field(default="", description="所属节点的内部名称")

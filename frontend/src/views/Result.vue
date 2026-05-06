@@ -118,7 +118,7 @@
 
         <!-- 每日行程:可折叠 -->
         <a-card title="📅 每日行程" :bordered="false" class="days-card">
-          <a-collapse v-model:activeKey="activeDays" accordion>
+          <a-collapse v-model:activeKey="activeDays" :accordion="false">
             <a-collapse-panel
               v-for="(day, index) in tripPlan.days"
               :key="index"
@@ -312,7 +312,6 @@ import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { DownOutlined } from '@ant-design/icons-vue'
-import AMapLoader from '@amap/amap-jsapi-loader'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import type { TripPlan } from '@/types'
@@ -492,115 +491,125 @@ const handleImageError = (event: Event) => {
 
 
 
+// 导出前先捕获地图（必须在 DOM 可见时截图，WebGL canvas 离屏后无法 toDataURL）
+const captureMapSnapshot = async (): Promise<string | null> => {
+  const mapContainer = document.getElementById('amap-container')
+  if (!mapContainer || !map) return null
+
+  try {
+    // 用 html2canvas 在元素可见时直接捕获地图容器
+    const mapCanvas = await html2canvas(mapContainer, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      logging: false,
+      useCORS: true,
+      allowTaint: true,
+    })
+    return mapCanvas.toDataURL('image/png')
+  } catch (e) {
+    console.error('地图截图失败:', e)
+    return null
+  }
+}
+
+// 将导出容器中的地图区域替换为截图 <img>
+const injectMapSnapshot = (container: HTMLElement, snapshot: string | null) => {
+  const exportMap = container.querySelector('#amap-container')
+  if (exportMap && snapshot) {
+    exportMap.innerHTML = `<img src="${snapshot}" style="width:100%;height:500px;object-fit:cover;border-radius:8px;" />`
+  } else if (exportMap) {
+    exportMap.innerHTML = `<div style="width:100%;height:500px;display:flex;align-items:center;justify-content:center;background:#f0f0f0;border-radius:8px;color:#999;font-size:16px;">地图暂不可用</div>`
+  }
+}
+
+// 给导出容器应用内联样式（去掉 ant-design 类依赖）
+const applyExportStyles = (container: HTMLElement) => {
+  const cards = container.querySelectorAll('.ant-card')
+  cards.forEach((card) => {
+    const el = card as HTMLElement
+    el.className = ''
+    el.style.setProperty('background-color', '#ffffff')
+    el.style.setProperty('border-radius', '12px')
+    el.style.setProperty('box-shadow', '0 4px 12px rgba(0, 0, 0, 0.1)')
+    el.style.setProperty('margin-bottom', '20px')
+    el.style.setProperty('overflow', 'hidden')
+  })
+
+  const cardHeads = container.querySelectorAll('.ant-card-head')
+  cardHeads.forEach((head) => {
+    const el = head as HTMLElement
+    el.style.setProperty('background-color', '#667eea')
+    el.style.setProperty('color', '#ffffff')
+    el.style.setProperty('padding', '16px 24px')
+    el.style.setProperty('font-size', '18px')
+    el.style.setProperty('font-weight', '600')
+  })
+
+  const cardBodies = container.querySelectorAll('.ant-card-body')
+  cardBodies.forEach((body) => {
+    const el = body as HTMLElement
+    el.style.setProperty('background-color', '#ffffff')
+    el.style.setProperty('padding', '24px')
+  })
+
+  const hotelCards = container.querySelectorAll('.hotel-card')
+  hotelCards.forEach((card) => {
+    const el = card as HTMLElement
+    const head = el.querySelector('.ant-card-head') as HTMLElement
+    if (head) head.style.setProperty('background-color', '#1976d2')
+    el.style.setProperty('background-color', '#e3f2fd')
+  })
+
+  const weatherCards = container.querySelectorAll('.weather-card')
+  weatherCards.forEach((card) => {
+    ;(card as HTMLElement).style.setProperty('background-color', '#e0f7fa')
+  })
+
+  const budgetTotal = container.querySelector('.budget-total')
+  if (budgetTotal) {
+    const el = budgetTotal as HTMLElement
+    el.style.setProperty('background-color', '#667eea')
+    el.style.setProperty('color', '#ffffff')
+    el.style.setProperty('padding', '20px')
+    el.style.setProperty('border-radius', '12px')
+    el.style.setProperty('margin-bottom', '20px')
+  }
+
+  const budgetItems = container.querySelectorAll('.budget-item')
+  budgetItems.forEach((item) => {
+    const el = item as HTMLElement
+    el.style.setProperty('background-color', '#f5f7fa')
+    el.style.setProperty('padding', '16px')
+    el.style.setProperty('border-radius', '8px')
+    el.style.setProperty('margin-bottom', '12px')
+  })
+}
+
 // 导出为图片
 const exportAsImage = async () => {
   try {
     message.loading({ content: '正在生成图片...', key: 'export', duration: 0 })
 
     const element = document.querySelector('.main-content') as HTMLElement
-    if (!element) {
-      throw new Error('未找到内容元素')
-    }
+    if (!element) throw new Error('未找到内容元素')
 
-    // 创建一个独立的容器
+    // 1. 先在地图可见时捕获地图
+    const mapSnapshot = await captureMapSnapshot()
+
+    // 2. 创建导出容器
     const exportContainer = document.createElement('div')
     exportContainer.style.width = element.offsetWidth + 'px'
     exportContainer.style.backgroundColor = '#f5f7fa'
     exportContainer.style.padding = '20px'
-
-    // 复制所有内容
     exportContainer.innerHTML = element.innerHTML
 
-    // 处理地图截图
-    const mapContainer = document.getElementById('amap-container')
-    if (mapContainer && map) {
-      const mapCanvas = mapContainer.querySelector('canvas')
-      if (mapCanvas) {
-        const mapSnapshot = mapCanvas.toDataURL('image/png')
-        const exportMapContainer = exportContainer.querySelector('#amap-container')
-        if (exportMapContainer) {
-          exportMapContainer.innerHTML = `<img src="${mapSnapshot}" style="width:100%;height:100%;object-fit:cover;" />`
-        }
-      }
-    }
+    // 3. 替换地图区域为截图
+    injectMapSnapshot(exportContainer, mapSnapshot)
 
-    // 移除所有ant-card类,替换为纯div
-    const cards = exportContainer.querySelectorAll('.ant-card')
-    cards.forEach((card) => {
-      const cardEl = card as HTMLElement
-      try {
-        cardEl.className = '' // 移除所有类
-        cardEl.style.setProperty('background-color', '#ffffff')
-        cardEl.style.setProperty('border-radius', '12px')
-        cardEl.style.setProperty('box-shadow', '0 4px 12px rgba(0, 0, 0, 0.1)')
-        cardEl.style.setProperty('margin-bottom', '20px')
-        cardEl.style.setProperty('overflow', 'hidden')
-      } catch (err) {
-        console.error('设置卡片样式失败:', err)
-      }
-    })
+    // 4. 应用内联样式
+    applyExportStyles(exportContainer)
 
-    // 处理卡片头部
-    const cardHeads = exportContainer.querySelectorAll('.ant-card-head')
-    cardHeads.forEach((head) => {
-      const headEl = head as HTMLElement
-      try {
-        headEl.style.setProperty('background-color', '#667eea')
-        headEl.style.setProperty('color', '#ffffff')
-        headEl.style.setProperty('padding', '16px 24px')
-        headEl.style.setProperty('font-size', '18px')
-        headEl.style.setProperty('font-weight', '600')
-      } catch (err) {
-        console.error('设置卡片头部样式失败:', err)
-      }
-    })
-
-    // 处理卡片内容
-    const cardBodies = exportContainer.querySelectorAll('.ant-card-body')
-    cardBodies.forEach((body) => {
-      const bodyEl = body as HTMLElement
-      bodyEl.style.setProperty('background-color', '#ffffff')
-      bodyEl.style.setProperty('padding', '24px')
-    })
-
-    // 处理酒店卡片头部
-    const hotelCards = exportContainer.querySelectorAll('.hotel-card')
-    hotelCards.forEach((card) => {
-      const head = card.querySelector('.ant-card-head') as HTMLElement
-      if (head) {
-        head.style.setProperty('background-color', '#1976d2')
-      }
-      (card as HTMLElement).style.setProperty('background-color', '#e3f2fd')
-    })
-
-    // 处理天气卡片
-    const weatherCards = exportContainer.querySelectorAll('.weather-card')
-    weatherCards.forEach((card) => {
-      (card as HTMLElement).style.setProperty('background-color', '#e0f7fa')
-    })
-
-    // 处理预算总计
-    const budgetTotal = exportContainer.querySelector('.budget-total')
-    if (budgetTotal) {
-      const el = budgetTotal as HTMLElement
-      el.style.setProperty('background-color', '#667eea')
-      el.style.setProperty('color', '#ffffff')
-      el.style.setProperty('padding', '20px')
-      el.style.setProperty('border-radius', '12px')
-      el.style.setProperty('margin-bottom', '20px')
-    }
-
-    // 处理预算项
-    const budgetItems = exportContainer.querySelectorAll('.budget-item')
-    budgetItems.forEach((item) => {
-      const el = item as HTMLElement
-      el.style.setProperty('background-color', '#f5f7fa')
-      el.style.setProperty('padding', '16px')
-      el.style.setProperty('border-radius', '8px')
-      el.style.setProperty('margin-bottom', '12px')
-    })
-
-    // 添加到body(隐藏)
+    // 5. 移到屏外并渲染
     exportContainer.style.position = 'absolute'
     exportContainer.style.left = '-9999px'
     document.body.appendChild(exportContainer)
@@ -610,13 +619,11 @@ const exportAsImage = async () => {
       scale: 2,
       logging: false,
       useCORS: true,
-      allowTaint: true
+      allowTaint: true,
     })
 
-    // 移除容器
     document.body.removeChild(exportContainer)
 
-    // 转换为图片并下载
     const link = document.createElement('a')
     link.download = `旅行计划_${tripPlan.value?.city}_${new Date().getTime()}.png`
     link.href = canvas.toDataURL('image/png')
@@ -635,109 +642,25 @@ const exportAsPDF = async () => {
     message.loading({ content: '正在生成PDF...', key: 'export', duration: 0 })
 
     const element = document.querySelector('.main-content') as HTMLElement
-    if (!element) {
-      throw new Error('未找到内容元素')
-    }
+    if (!element) throw new Error('未找到内容元素')
 
-    // 创建一个独立的容器
+    // 1. 先在地图可见时捕获地图
+    const mapSnapshot = await captureMapSnapshot()
+
+    // 2. 创建导出容器
     const exportContainer = document.createElement('div')
     exportContainer.style.width = element.offsetWidth + 'px'
     exportContainer.style.backgroundColor = '#f5f7fa'
     exportContainer.style.padding = '20px'
-
-    // 复制所有内容
     exportContainer.innerHTML = element.innerHTML
 
-    // 处理地图截图
-    const mapContainer = document.getElementById('amap-container')
-    if (mapContainer && map) {
-      const mapCanvas = mapContainer.querySelector('canvas')
-      if (mapCanvas) {
-        const mapSnapshot = mapCanvas.toDataURL('image/png')
-        const exportMapContainer = exportContainer.querySelector('#amap-container')
-        if (exportMapContainer) {
-          exportMapContainer.innerHTML = `<img src="${mapSnapshot}" style="width:100%;height:100%;object-fit:cover;" />`
-        }
-      }
-    }
+    // 3. 替换地图区域为截图
+    injectMapSnapshot(exportContainer, mapSnapshot)
 
-    // 移除所有ant-card类,替换为纯div
-    const cards = exportContainer.querySelectorAll('.ant-card')
-    cards.forEach((card) => {
-      const cardEl = card as HTMLElement
-      try {
-        cardEl.className = ''
-        cardEl.style.setProperty('background-color', '#ffffff')
-        cardEl.style.setProperty('border-radius', '12px')
-        cardEl.style.setProperty('box-shadow', '0 4px 12px rgba(0, 0, 0, 0.1)')
-        cardEl.style.setProperty('margin-bottom', '20px')
-        cardEl.style.setProperty('overflow', 'hidden')
-      } catch (err) {
-        console.error('设置卡片样式失败:', err)
-      }
-    })
+    // 4. 应用内联样式
+    applyExportStyles(exportContainer)
 
-    // 处理卡片头部
-    const cardHeads = exportContainer.querySelectorAll('.ant-card-head')
-    cardHeads.forEach((head) => {
-      const headEl = head as HTMLElement
-      try {
-        headEl.style.setProperty('background-color', '#667eea')
-        headEl.style.setProperty('color', '#ffffff')
-        headEl.style.setProperty('padding', '16px 24px')
-        headEl.style.setProperty('font-size', '18px')
-        headEl.style.setProperty('font-weight', '600')
-      } catch (err) {
-        console.error('设置卡片头部样式失败:', err)
-      }
-    })
-
-    // 处理卡片内容
-    const cardBodies = exportContainer.querySelectorAll('.ant-card-body')
-    cardBodies.forEach((body) => {
-      const bodyEl = body as HTMLElement
-      bodyEl.style.setProperty('background-color', '#ffffff')
-      bodyEl.style.setProperty('padding', '24px')
-    })
-
-    // 处理酒店卡片头部
-    const hotelCards = exportContainer.querySelectorAll('.hotel-card')
-    hotelCards.forEach((card) => {
-      const head = card.querySelector('.ant-card-head') as HTMLElement
-      if (head) {
-        head.style.setProperty('background-color', '#1976d2')
-      }
-      (card as HTMLElement).style.setProperty('background-color', '#e3f2fd')
-    })
-
-    // 处理天气卡片
-    const weatherCards = exportContainer.querySelectorAll('.weather-card')
-    weatherCards.forEach((card) => {
-      (card as HTMLElement).style.setProperty('background-color', '#e0f7fa')
-    })
-
-    // 处理预算总计
-    const budgetTotal = exportContainer.querySelector('.budget-total')
-    if (budgetTotal) {
-      const el = budgetTotal as HTMLElement
-      el.style.setProperty('background-color', '#667eea')
-      el.style.setProperty('color', '#ffffff')
-      el.style.setProperty('padding', '20px')
-      el.style.setProperty('border-radius', '12px')
-      el.style.setProperty('margin-bottom', '20px')
-    }
-
-    // 处理预算项
-    const budgetItems = exportContainer.querySelectorAll('.budget-item')
-    budgetItems.forEach((item) => {
-      const el = item as HTMLElement
-      el.style.setProperty('background-color', '#f5f7fa')
-      el.style.setProperty('padding', '16px')
-      el.style.setProperty('border-radius', '8px')
-      el.style.setProperty('margin-bottom', '12px')
-    })
-
-    // 添加到body(隐藏)
+    // 5. 移到屏外并渲染
     exportContainer.style.position = 'absolute'
     exportContainer.style.left = '-9999px'
     document.body.appendChild(exportContainer)
@@ -747,28 +670,26 @@ const exportAsPDF = async () => {
       scale: 2,
       logging: false,
       useCORS: true,
-      allowTaint: true
+      allowTaint: true,
     })
 
-    // 移除容器
     document.body.removeChild(exportContainer)
 
     const imgData = canvas.toDataURL('image/png')
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
-      format: 'a4'
+      format: 'a4',
     })
 
     const imgWidth = 210 // A4宽度(mm)
     const imgHeight = (canvas.height * imgWidth) / canvas.width
 
-    // 如果内容高度超过一页,分页处理
     let heightLeft = imgHeight
     let position = 0
 
     pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-    heightLeft -= 297 // A4高度
+    heightLeft -= 297
 
     while (heightLeft > 0) {
       position = heightLeft - imgHeight
@@ -786,63 +707,49 @@ const exportAsPDF = async () => {
   }
 }
 
-// 截取地图图片
-const captureMapImage = async () => {
-  if (!map) return
-
-  try {
-    // 获取地图容器
-    const mapContainer = document.getElementById('amap-container')
-    if (!mapContainer) return
-
-    // 使用高德地图的截图功能
-    const mapCanvas = mapContainer.querySelector('canvas')
-    if (mapCanvas) {
-      // 创建一个img元素替换地图容器
-      const img = document.createElement('img')
-      img.src = mapCanvas.toDataURL('image/png')
-      img.style.width = '100%'
-      img.style.height = '500px'
-      img.style.objectFit = 'cover'
-      img.id = 'map-snapshot'
-
-      // 隐藏原地图,显示截图
-      mapContainer.style.display = 'none'
-      mapContainer.parentElement?.appendChild(img)
-    }
-  } catch (error) {
-    console.error('截取地图失败:', error)
-  }
-}
-
-// 恢复地图
-const restoreMap = () => {
-  const mapContainer = document.getElementById('amap-container')
-  const snapshot = document.getElementById('map-snapshot')
-
-  if (mapContainer) {
-    mapContainer.style.display = 'block'
-  }
-
-  if (snapshot) {
-    snapshot.remove()
-  }
-}
-
 // 初始化地图
-const initMap = async () => {
+const initMap = () => {
+  const amapKey = import.meta.env.VITE_AMAP_WEB_JS_KEY
+  if (!amapKey) {
+    console.error('[Map] 高德地图 Key 未配置')
+    return
+  }
+
+  // 如果已加载过脚本，直接创建地图
+  const existingAMap = (window as any).AMap
+  if (existingAMap) {
+    createMapInstance(existingAMap)
+    return
+  }
+
+  // 使用 v1.4.15 DOM 渲染版本，html2canvas 可直接捕获完整地图（街道+建筑+标记+路线）
+  const script = document.createElement('script')
+  script.src = `https://webapi.amap.com/maps?v=1.4.15&key=${amapKey}&plugin=AMap.Geocoder,AMap.Scale,AMap.ToolBar`
+  script.onload = () => {
+    const AMap = (window as any).AMap
+    if (AMap) {
+      createMapInstance(AMap)
+    }
+  }
+  script.onerror = () => {
+    console.error('[Map] 高德地图脚本加载失败')
+    message.error('地图加载失败')
+  }
+  document.head.appendChild(script)
+}
+
+function createMapInstance(AMap: any) {
   try {
-    const AMap = await AMapLoader.load({
-      key: import.meta.env.VITE_AMAP_WEB_JS_KEY,  // 高德地图Web端(JS API) Key
-      version: '2.0',
-      plugins: ['AMap.Marker', 'AMap.Polyline', 'AMap.InfoWindow']
+    map = new AMap.Map('amap-container', {
+      resizeEnable: true,
+      zoom: 12,
+      center: [116.397128, 39.916527],
     })
 
-    // 创建地图实例
-    map = new AMap.Map('amap-container', {
-      zoom: 12,
-      center: [116.397128, 39.916527], // 默认中心点(北京)
-      viewMode: '3D'
+    // 添加控件
+    AMap.plugin(['AMap.Scale', 'AMap.ToolBar'], () => {
+      map.addControl(new AMap.Scale())
+      map.addControl(new AMap.ToolBar())
     })
 
     // 添加景点标记
@@ -850,8 +757,8 @@ const initMap = async () => {
 
     message.success('地图加载成功')
   } catch (error) {
-    console.error('地图加载失败:', error)
-    message.error('地图加载失败')
+    console.error('地图创建失败:', error)
+    message.error('地图创建失败')
   }
 }
 
