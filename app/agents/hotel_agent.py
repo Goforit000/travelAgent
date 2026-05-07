@@ -45,12 +45,13 @@ class HotelAgent(BaseAgent):
 - "民宿" → 搜索"民宿"、"客栈"、"短租公寓"
 
 重要规则：
-- 必须至少搜索一次，最多搜索 3 次
+- 必须至少搜索一次
 - 首次搜索用用户的住宿偏好作为关键词
 - 如果结果不足（< 3 条），换一个相关关键词补搜
 - 输出必须是有效 JSON，格式为:
   {"summary": "搜索总结", "keywords_used": ["关键词1"], "total_found": N, "hotels": [...]}
-  其中 hotels 是去重合并后的酒店列表"""
+  其中 hotels 是去重合并后的酒店列表
+  """
 
     @property
     def tools(self) -> list[BaseTool]:

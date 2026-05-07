@@ -36,7 +36,6 @@ class SupervisorAgent(BaseAgent):
         return """你是旅行规划工作流的总监督者（Supervisor）。你只做阶段级路由决策。
 
 ## 可路由的阶段
-
 | 阶段 | 路由值 | 触发的节点 | 说明 |
 |------|--------|-----------|------|
 | 数据收集 | "collect" | data_collection_node | 并行执行 POI+Weather+Hotel |
@@ -74,11 +73,17 @@ class SupervisorAgent(BaseAgent):
 且 raw_plan_text 为空或 agent_outputs 中不存在 "budget_agent"：
 → next_agent = "planner"
 
-### 规则 5：完成
-如果 agent_outputs 中同时存在 "planner_agent" 和 "budget_agent"：
+### 规则 5：预算超限回退
+如果 agent_outputs 中 budget_agent 的值以 "OVERSHOOT|" 开头：
+→ next_agent = "planner"，phase = "review"
+这是最高优先级的规划阶段规则。收到此信号立即路由到 planner，不要犹豫。
+
+### 规则 6：完成
+如果 agent_outputs 中同时存在 "planner_agent" 和 "budget_agent"，
+且 budget_agent 不是 "OVERSHOOT|" 开头：
 → next_agent = "finalize"
 
-### 规则 6：兜底
+### 规则 7：兜底
 以上规则都不匹配：
 → next_agent = "finalize"
 
@@ -134,9 +139,31 @@ class SupervisorAgent(BaseAgent):
         agent_outputs = state.get("agent_outputs", {})
 
         data_ready = bool(raw_attractions and raw_weather and raw_hotels)
-        plan_ready = bool(raw_plan_text and "budget_agent" in agent_outputs)
+        budget_value = agent_outputs.get("budget_agent", "")
+        budget_overshoot = budget_value.startswith("OVERSHOOT|") if isinstance(budget_value, str) else False
+        plan_ready = bool(raw_plan_text and "budget_agent" in agent_outputs and not budget_overshoot)
 
-        return f"""请根据状态做出阶段路由决策：
+        # 提取预算超限详情用于醒目提示
+        overshoot_warning = ""
+        if budget_overshoot:
+            try:
+                payload_json = budget_value.split("|", 1)[1]
+                payload = json.loads(payload_json)
+                target = payload.get("target_budget", 0)
+                overshoot = payload.get("overshoot_amount", 0)
+                total = payload.get("budget", {}).get("total", 0)
+                revision_round = state.get("revision_round", 0)
+                overshoot_warning = (
+                    f"\n\n{'⚠️' * 3} 预算超限警报 {'⚠️' * 3}\n"
+                    f"总费用 {total} 元 > 目标预算 {target} 元（超支 {overshoot} 元）\n"
+                    f"当前修正轮数: {revision_round}/2\n"
+                    f"请立即路由到 planner 进行第 {revision_round + 1} 次预算修正！\n"
+                    f"{'⚠️' * 15}\n"
+                )
+            except Exception:
+                overshoot_warning = "\n\n⚠️ 预算超限! Budget Agent 检测到费用超出目标预算。请立即路由到 planner。\n"
+
+        return f"""请根据状态做出阶段路由决策：{overshoot_warning}
 
 === 数据状态 ===
 景点: {'✅ ' + str(len(raw_attractions)) + ' 条' if raw_attractions else '❌ 未收集'}
@@ -242,6 +269,13 @@ error: {'"' + error[:100] + '"' if error else '无'}
         hotel_done = "hotel_agent" in agent_outputs
         planner_done = "planner_agent" in agent_outputs
         budget_done = "budget_agent" in agent_outputs
+
+        # 检测预算超限信号（最高优先级的规划阶段规则）
+        budget_value = agent_outputs.get("budget_agent", "")
+        budget_overshoot = isinstance(budget_value, str) and budget_value.startswith("OVERSHOOT|")
+        revision_round = state.get("revision_round", 0)
+        if budget_overshoot and revision_round < 2:
+            return "planner"
 
         # 数据收集
         if not (data_ready or (poi_done and weather_done and hotel_done)):

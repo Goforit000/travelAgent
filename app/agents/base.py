@@ -2,7 +2,7 @@
 Agent 基类 — 所有 Agent 的抽象父类
 
 设计原则：
-1. 每个 Agent 都是一个独立的 ReAct 循环：
+1. 有些Agent 是一个独立的 ReAct 循环：
    - 思考 (Think)：LLM 分析当前状态，决定调用工具 or 给出最终回答
    - 行动 (Act)：执行工具调用，将结果追加到消息历史
    - 观察 (Observe)：LLM 看到工具结果，继续决策
@@ -59,19 +59,16 @@ class BaseAgent(ABC):
     """
 
     # ===== 必须由子类覆盖 =====
-
     @property
     @abstractmethod
     def name(self) -> str:
         """Agent 的唯一标识名称，如 'poi_agent'"""
         ...
-
     @property
     @abstractmethod
     def description(self) -> str:
         """Agent 职责描述，供 Supervisor 路由决策时参考"""
         ...
-
     @property
     @abstractmethod
     def system_prompt(self) -> str:
@@ -79,7 +76,6 @@ class BaseAgent(ABC):
         ...
 
     # ===== 可选覆盖 =====
-
     @property
     def tools(self) -> Sequence[BaseTool]:
         """该 Agent 可调用的工具列表，子类覆盖以绑定工具"""
@@ -108,7 +104,6 @@ class BaseAgent(ABC):
         return DEFAULT_REQUEST_TIMEOUT
 
     # ===== 模型获取 =====
-
     def _get_model(self) -> ChatOpenAI:
         """
         获取绑定了工具的 ChatOpenAI 实例
@@ -126,11 +121,9 @@ class BaseAgent(ABC):
         )
 
     # ===== ReAct 循环核心 =====
-
     def run(self, state: TripState) -> dict:
         """
         Agent 主入口 — 执行 ReAct 循环
-
         流程：
         1. 从 state 中提取相关字段，构造初始 messages
         2. 进入 ReAct 循环：
@@ -168,7 +161,6 @@ class BaseAgent(ABC):
             if tool_calls:
                 # ——— 有工具调用：执行工具并追加结果 ———
                 print(f"  [{self.name}] LLM 请求调用 {len(tool_calls)} 个工具")
-
                 tool_messages = self._execute_tool_calls(tool_calls)
                 messages.extend(tool_messages)
 
@@ -190,7 +182,6 @@ class BaseAgent(ABC):
         raise MaxStepsExceededError(self.name, self.max_steps)
 
     # ===== 消息构建 =====
-
     def _build_initial_messages(self, state: TripState) -> list[BaseMessage]:
         """
         构造 ReAct 循环的初始消息列表
@@ -216,7 +207,6 @@ class BaseAgent(ABC):
     def _build_context_message(self, state: TripState) -> str:
         """
         构造上下文消息 — 子类覆盖以提供自定义的上下文字符串
-
         默认返回空字符串（不追加额外上下文）。
         """
         return ""
@@ -287,7 +277,6 @@ class BaseAgent(ABC):
     ) -> dict:
         """
         解析 LLM 的最终输出，转换为 State 更新字典
-
         子类必须覆盖此方法以实现自己的输出提取逻辑。
         默认实现：返回空字典（不更新任何 State 字段）。
 
@@ -330,13 +319,20 @@ class BaseAgent(ABC):
             if end > start:
                 return text[start:end].strip()
 
-        # 情况3：直接找 { ... }
+        # 情况3：括号计数法精确匹配嵌套 JSON
         if "{" in text and "}" in text:
             start = text.find("{")
-            end = text.rfind("}") + 1
-            if end > start:
-                return text[start:end]
-
+            brace_count = 0
+            end = start
+            for i, ch in enumerate(text[start:], start):
+                if ch == "{":
+                    brace_count += 1
+                elif ch == "}":
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end = i + 1
+                        break
+            return text[start:end] if end > start else None
         return None
 
     def __repr__(self) -> str:

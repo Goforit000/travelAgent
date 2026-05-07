@@ -1,0 +1,399 @@
+ 多 Agent 系统内部架构深度分析报告
+
+  ---
+  一、架构对比矩阵
+
+  Agent: Supervisor
+  架构模式: 单次决策
+  是否有 ReAct 循环: ❌ 无
+  继承 run() 方式: 完全覆盖
+  工具数量: 0
+  max_steps: 1
+  工具绑定: 无
+  输出 State 字段: next_agent, phase, retry_count, error, iteration_count
+  ────────────────────────────────────────
+  Agent: POI Agent
+  架构模式: ReAct + Tool Calling
+  是否有 ReAct 循环: ✅ 有
+  继承 run() 方式: 继承基类
+  工具数量: 1
+  max_steps: 5
+  工具绑定: search_attractions_tool
+  输出 State 字段: raw_attractions
+  ────────────────────────────────────────
+  Agent: Weather Agent
+  架构模式: ReAct + Tool Calling
+  是否有 ReAct 循环: ✅ 有
+  继承 run() 方式: 继承基类
+  工具数量: 1
+  max_steps: 2
+  工具绑定: query_weather_tool
+  输出 State 字段: raw_weather
+  ────────────────────────────────────────
+  Agent: Hotel Agent
+  架构模式: ReAct + Tool Calling
+  是否有 ReAct 循环: ✅ 有
+  继承 run() 方式: 继承基类
+  工具数量: 1
+  max_steps: 5
+  工具绑定: search_hotels_tool
+  输出 State 字段: raw_hotels
+  ────────────────────────────────────────
+  Agent: Planner Agent
+  架构模式: 单次 Prompt-Response
+  是否有 ReAct 循环: ❌ 无
+  继承 run() 方式: 完全覆盖
+  工具数量: 0
+  max_steps: 1
+  工具绑定: 无
+  输出 State 字段: raw_plan_text
+  ────────────────────────────────────────
+  Agent: Budget Agent
+  架构模式: ReAct + Tool Calling
+  是否有 ReAct 循环: ✅ 有
+  继承 run() 方式: 继承基类
+  工具数量: 2
+  max_steps: 5
+  工具绑定: calculate_budget_tool + suggest_savings_tool
+  输出 State 字段: agent_outputs, trip_plan(可选)
+
+  关键发现：项目内存在两种 Agent 实现模式——
+  - 模式 A（3个）：POI / Weather / Hotel / Budget → 继承 BaseAgent 的 ReAct 循环，LLM 通过 Tool Calling 自主决策调用工具
+  - 模式 B（2个）：Supervisor / Planner → 覆盖 run()，单次 LLM 调用，无工具、无循环
+
+  ---
+  二、逐 Agent 深度剖析
+
+  ---
+  Agent 1：Supervisor Agent（监督者）
+
+  1. 架构模式
+
+  单次决策模式（Single-Shot Decision）
+
+  不继承 BaseAgent 的 ReAct 循环，完全覆盖 run() 方法。每次被调用时，执行一次 get_chat_model() →
+  model.invoke([SystemMessage, HumanMessage])，解析输出中的 next_agent 字段完成路由决策。无工具绑定，无循环。
+
+  2. 核心控制流伪代码
+
+  run(state):
+    1. model = get_chat_model()               // 无工具绑定，默认 token/timeout
+    2. context = _build_context_message(state) // 格式化为: 数据状态 + Agent执行状态 + 控制字段
+    3. messages = [SystemMessage(10条决策规则), HumanMessage(context)]
+    4. response = model.invoke(messages)       // 单次 LLM 调用
+    5. next_agent, reason, phase = _parse_decision(state, response.content)
+          ├── 尝试 json.loads(纯JSON) → 提取 next_agent
+          ├── 失败 → _extract_json(含代码块的JSON) → 提取
+          └── 失败 → _hardcoded_fallback(state) // 硬编码规则兜底
+    6. 校验 next_agent 合法性 ∈ {collect, plan, finalize, poi, weather, hotel, planner, budget}
+          └── 非法 → _hardcoded_fallback(state)
+    7. 检查 iteration_count >= max_iterations → 强制 "finalize"
+    8. 返回 {next_agent, last_agent, phase, retry_count(重置), error(清空), iteration_count+1}
+
+  3. 系统提示词作用
+
+  - 定义 6 个可路由阶段值 + 5 个单 Agent 重试路由值
+  - 嵌入 7 条决策规则（按优先级：0 防死循环 → 1 错误重试 → 2 错误降级 → 3 数据收集 → 4 规划 → 5 完成 → 6 兜底）
+  - 输出格式约束：{"next_agent": "...", "reason": "...", "phase": "collect|plan|done"}
+  - 强调基于 agent_outputs 字典判断进度，而非 trip_plan（因为 trip_plan 仅在 finalize 中创建）
+
+  4. 输入/输出约定
+
+  ┌──────┬───────────────────┬──────────────────────────────────────────────────────────────────────────────────────┐
+  │ 方向 │       数据        │                                         说明                                         │
+  ├──────┼───────────────────┼──────────────────────────────────────────────────────────────────────────────────────┤
+  │ 输入 │ state 全部字段    │ 特别依赖                                                                             │
+  │      │                   │ agent_outputs、raw_attractions/weather/hotels、raw_plan_text、error、retry_count     │
+  ├──────┼───────────────────┼──────────────────────────────────────────────────────────────────────────────────────┤
+  │ 输出 │ next_agent: str   │ 阶段路由值或单Agent重试值                                                            │
+  ├──────┼───────────────────┼──────────────────────────────────────────────────────────────────────────────────────┤
+  │      │ phase: str        │ "collect" / "plan" / "done"                                                          │
+  ├──────┼───────────────────┼──────────────────────────────────────────────────────────────────────────────────────┤
+  │      │ retry_count: int  │ Agent 变更时重置为 0                                                                 │
+  ├──────┼───────────────────┼──────────────────────────────────────────────────────────────────────────────────────┤
+  │      │ error: str        │ Agent 变更时清空                                                                     │
+  ├──────┼───────────────────┼──────────────────────────────────────────────────────────────────────────────────────┤
+  │      │ iteration_count:  │ 递增 1                                                                               │
+  │      │ int               │                                                                                      │
+  └──────┴───────────────────┴──────────────────────────────────────────────────────────────────────────────────────┘
+
+  5. 状态管理方式
+
+  - 无状态：每次调用重新分析全部 State
+  - 决策依据不持久化在 Agent 内部
+  - 有 _hardcoded_fallback() 作为 LLM 失败的兜底保障
+
+  ---
+  Agent 2：POI Agent（景点搜索）
+
+  1. 架构模式
+
+  ReAct + Tool Calling 模式
+
+  继承 BaseAgent 的 run() 方法，进入标准 ReAct 循环。LLM 绑定
+  search_attractions_tool，自主决定搜索关键词、搜索次数、何时结束。
+
+  2. 核心控制流伪代码
+
+  run(state):  // 继承自 BaseAgent
+    1. model = _get_model()                    // model.bind_tools([search_attractions_tool])
+    2. messages = [SystemMessage(搜索策略指南), HumanMessage(city + preferences)]
+    3. for step in 1..5:                       // max_steps=5
+         response = model.invoke(messages)
+         if response.tool_calls:
+             执行 search_attractions_tool → 结果追加为 ToolMessage → 继续循环
+         else:
+             // LLM 自主决定"已经搜够了"
+             return _parse_final_output(state, response.content, messages)
+    4. 超出 max_steps → 抛 MaxStepsExceededError
+
+  3. 系统提示词作用
+
+  - 定义 5 步搜索任务流程（分析偏好 → 按关键词搜索 → 评估结果 → 不够则补搜 → 汇总）
+  - 内嵌"偏好→关键词"映射表（如"美食"→"美食街""特色小吃""夜市"）
+  - 硬约束：至少搜 1 次、最多搜 4 次、结果 <3 条必须补搜
+  - 输出 JSON 格式要求：{"summary": "...", "keywords_used": [...], "total_found": N, "attractions": [...]}
+
+  4. 输入/输出约定
+
+  ┌──────┬─────────────────────────────┬─────────────────────────────────────────┐
+  │ 方向 │            数据             │                  说明                   │
+  ├──────┼─────────────────────────────┼─────────────────────────────────────────┤
+  │ 输入 │ request.city                │ 目的地城市                              │
+  ├──────┼─────────────────────────────┼─────────────────────────────────────────┤
+  │      │ request.preferences         │ 偏好标签列表（如 ["历史文化", "美食"]） │
+  ├──────┼─────────────────────────────┼─────────────────────────────────────────┤
+  │      │ request.free_text_input     │ 额外要求                                │
+  ├──────┼─────────────────────────────┼─────────────────────────────────────────┤
+  │ 输出 │ raw_attractions: list[dict] │ 去重后的景点列表                        │
+  ├──────┼─────────────────────────────┼─────────────────────────────────────────┤
+  │      │ agent_outputs["poi_agent"]  │ 搜索总结（如"共搜索到 8 个去重景点"）   │
+  └──────┴─────────────────────────────┴─────────────────────────────────────────┘
+
+  5. 状态管理方式
+
+  - 无状态：每次 run() 重新构造 messages
+  - ReAct 过程中 messages 在内存增长但不持久化到 State
+  - 最终结果通过 _parse_final_output 提取并写入 raw_attractions
+
+  ---
+  Agent 3：Weather Agent（天气查询）
+
+  1. 架构模式
+
+  ReAct + Tool Calling 模式（最简化）
+
+  继承 BaseAgent。因为任务极简单（一个城市 → 一次 API 调用），LLM 通常在第 1 步就调用工具，第 2 步给出最终回答。
+
+  2. 核心控制流伪代码
+
+  run(state):  // 继承自 BaseAgent
+    1. model = _get_model()                    // model.bind_tools([query_weather_tool])
+    2. messages = [SystemMessage(天气查询角色), HumanMessage(city + travel_days)]
+    3. for step in 1..2:                       // max_steps=2
+         response = model.invoke(messages)
+         if response.tool_calls:
+             执行 query_weather_tool → 结果追加 → 继续
+         else:
+             return _parse_final_output(state, response.content, messages)
+    4. 超出 max_steps → 抛异常
+
+  3. 系统提示词作用
+
+  - 极简定义：查询天气 → 确保城市名正确 → 输出结果
+  - 输出 JSON 格式：{"city": "...", "days_forecast": N, "summary": "...", "weather_data": [...]}
+
+  4. 输入/输出约定
+
+  ┌──────┬─────────────────────────────────────────────────────────────────────────┐
+  │ 方向 │                                  数据                                   │
+  ├──────┼─────────────────────────────────────────────────────────────────────────┤
+  │ 输入 │ request.city, request.start_date, request.end_date, request.travel_days │
+  ├──────┼─────────────────────────────────────────────────────────────────────────┤
+  │ 输出 │ raw_weather: list[dict]                                                 │
+  └──────┴─────────────────────────────────────────────────────────────────────────┘
+
+  5. 状态管理方式
+
+  同 POI Agent——无状态，最终结果提取写入 State。
+
+  ---
+  Agent 4：Hotel Agent（酒店搜索）
+
+  1. 架构模式
+
+  ReAct + Tool Calling 模式
+
+  与 POI Agent 高度相似。LLM 绑定 search_hotels_tool，自主决定搜索策略、是否补搜。
+
+  2. 核心控制流伪代码
+
+  run(state):  // 继承自 BaseAgent
+    1. model = _get_model()                    // model.bind_tools([search_hotels_tool])
+    2. messages = [SystemMessage(住宿类型→关键词映射), HumanMessage(city + accommodation)]
+    3. for step in 1..5:                       // max_steps=5
+         response = model.invoke(messages)
+         if response.tool_calls:
+             执行 search_hotels_tool → 结果追加 → 继续
+         else:
+             return _parse_final_output(state, response.content, messages)
+
+  3. 系统提示词作用
+
+  - 定义住宿类型→搜索关键词映射表（如"经济型酒店"→"快捷酒店""青年旅舍"）
+  - 硬约束：至少 1 次、最多 3 次、<3 条补搜
+  - 输出格式：{"summary": "...", "keywords_used": [...], "total_found": N, "hotels": [...]}
+
+  4. 输入/输出约定
+
+  ┌──────┬──────────────────────────────────────────────────────────────┐
+  │ 方向 │                             数据                             │
+  ├──────┼──────────────────────────────────────────────────────────────┤
+  │ 输入 │ request.city, request.accommodation, request.free_text_input │
+  ├──────┼──────────────────────────────────────────────────────────────┤
+  │ 输出 │ raw_hotels: list[dict]                                       │
+  └──────┴──────────────────────────────────────────────────────────────┘
+
+  5. 状态管理方式
+
+  同 POI Agent。
+
+  ---
+  Agent 5：Planner Agent（行程规划）⚠️ 重点
+
+  1. 架构模式
+
+  单次 Prompt-Response 模式（Single-Shot Generation）
+
+  完全覆盖 run() 方法，不使用 BaseAgent 的 ReAct 循环。无工具绑定。一次 LLM 调用完成从原始数据到完整 JSON 的生成。
+
+  2. 核心控制流伪代码
+
+  run(state):  // ★ 完全覆盖，不走 ReAct
+    1. 从 state 提取 request + raw_attractions/weather/hotels
+    2. context = _build_human_message(request, state)
+          ├── 基本信息: city + date + travel_days + transportation + accommodation + preferences
+          ├── _format_attractions(raw)  → 编号列表文本（按评分排序，top N 条）
+          ├── _format_weather(raw)      → 日期+天气+温度文本行
+          └── _format_hotels(raw)       → 编号列表文本（top 5 条）
+    3. messages = [SystemMessage(内联完整JSON schema + 任务要求), HumanMessage(context)]
+    4. model = get_chat_model(max_tokens=6144, request_timeout=180s)  // 无工具绑定
+    5. response = model.invoke(messages)                               // ★ 唯一的 LLM 调用
+    6. raw_plan_text = _parse_response(response.content)
+          ├── 去除 markdown 代码块
+          └── 括号计数法精确匹配完整嵌套 JSON
+    7. 基础校验: 提取JSON → 检查 "days" 字段是否存在
+    8. 返回 {raw_plan_text, error, agent_outputs}
+
+  3. 是否支持逐步调整重规划
+
+  答案：不支持。Planner Agent 内部是一次性全量生成。
+
+  具体机制：
+  - 单次 LLM 调用：所有景点选择、日程排列、三餐安排、酒店推荐、预算估算在一次 model.invoke() 中完成
+  - 无自检循环：不调用 validate_itinerary_tool，不验证生成结果再修正
+  - 无工具调用：tools = []，LLM 无法在生成过程中"补搜缺失信息"
+  - 无反馈循环：max_steps = 1，prompt 发出去 → 拿结果 → 结束
+
+  如果要修正，必须依赖外部机制：
+  1. finalize_node 中 Pydantic 校验失败 → 使用 fallback 计划（硬编码坐标，质量低）
+  2. Supervisor 检测到 planner_agent 的 agent_outputs 包含错误 → 重新路由到 "planner"
+  重试（但这是完整重新生成，不是基于上次结果的部分修正）
+
+  对比旧版：旧版 PlannerAgent 有 ReAct 循环（生成 → validate → 修正 → 再 validate →
+  输出），支持逐步调整。重构时为了性能将 ReAct 循环移除，代价是放弃了自检和修正能力。
+
+  4. 系统提示词作用
+
+  - 内联完整 JSON schema（每个字段显式声明，约 60 行模板代码）
+  - 5 条任务要求（选景点、用真实坐标、三餐、酒店、预算）
+  - 硬约束："每个字段都必须填写，禁止省略。禁止将嵌套对象简化为字符串或数字"
+
+  5. 输入/输出约定
+
+  ┌──────┬────────────────────────────────────────────────────────────────────┐
+  │ 方向 │                                数据                                │
+  ├──────┼────────────────────────────────────────────────────────────────────┤
+  │ 输入 │ request.*（全部字段） + raw_attractions + raw_weather + raw_hotels │
+  ├──────┼────────────────────────────────────────────────────────────────────┤
+  │ 输出 │ raw_plan_text: str（完整的旅行计划 JSON 字符串）                   │
+  └──────┴────────────────────────────────────────────────────────────────────┘
+
+  6. 状态管理方式
+
+  - 无状态：每次 run() 独立构造完整 prompt
+  - 不读取 messages 历史（不走 ReAct 所以没有消息积累）
+  - 数据格式化函数（_format_attractions 等）是模块级纯函数，不复用状态
+
+  ---
+  Agent 6：Budget Agent（预算计算）
+
+  1. 架构模式
+
+  ReAct + Tool Calling 模式
+
+  继承 BaseAgent 的标准 ReAct 循环。LLM 绑定两个工具：calculate_budget_tool + suggest_savings_tool。典型执行路径：
+
+  步骤 0: LLM 分析上下文（看到行程 JSON + 参数提示）
+  步骤 1: LLM 调用 calculate_budget_tool(trip_plan_json=..., hotel_cost_per_night=..., transport_cost_per_day=...)
+  步骤 2: LLM 收到计算结果 → 分析是否存在 overshoot → 决策:
+          - 无超限 → 输出最终预算 JSON（结束）
+          - 有超限 → 调用 suggest_savings_tool → 收到削减方案 → 输出最终 JSON（结束）
+
+  2. 核心控制流伪代码
+
+  run(state):  // 继承自 BaseAgent
+    1. model = _get_model()                    // model.bind_tools([calculate_budget_tool, suggest_savings_tool])
+    2. messages = [SystemMessage(预算分析角色+输出格式), HumanMessage(raw_plan_text + 参数)]
+    3. for step in 1..5:                       // max_steps=5
+         response = model.invoke(messages)
+         if response.tool_calls:
+             执行 calculate_budget_tool 或 suggest_savings_tool → 结果追加 → 继续
+         else:
+             return _parse_final_output(state, response.content, messages)
+
+  3. 系统提示词作用
+
+  - 定义 4 步工作流程（提取JSON → 计算 → 分析合理性 → 超限则削减）
+  - 价格合理性判断标准（单人门票 >200 元标记、日均餐饮 50-150 元正常）
+  - 输出 JSON 格式：{"status": "done", "budget": {...}, "analysis": "...", "suggestions": [...]}
+
+  4. 输入/输出约定
+
+  ┌──────┬──────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ 方向 │                                               数据                                               │
+  ├──────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ 输入 │ raw_plan_text（行程 JSON）+ request.accommodation + request.transportation + request.travel_days │
+  ├──────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ 输出 │ agent_outputs["budget_agent"]（预算分析总结）                                                    │
+  ├──────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │      │ trip_plan.budget（可选，仅当 trip_plan 已存在时合并）                                            │
+  └──────┴──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  5. 状态管理方式
+
+  同 POI/Hotel/Weather——无状态，最终提取写入 State。
+
+  ---
+  三、总结：两种 Agent 实现模式的技术决策
+
+  ┌────────────────┬───────────────────────────────────────┬───────────────────────────────────────────────────────┐
+  │      维度      │                ReAct                  │    单次 Prompt-Response 模式（Supervisor/Planner）    │
+  │                │   模式（POI/Weather/Hotel/Budget）    │                                                       │
+  ├────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────┤
+  │ 适用场景       │ 需要 LLM 自主决策工具调用次数和策略   │ 输出格式确定、不需要交互反馈                          │
+  ├────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────┤
+  │ LLM 调用次数   │ 2-5 次（每步一次决策或工具调用）      │ 1 次                                                  │
+  ├────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────┤
+  │ 优势           │ 灵活、能处理未知情况、可自我修正      │ 快、prompt 简单、token 消耗少                         │
+  ├────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────┤
+  │ 劣势           │ 多次 LLM 调用耗时、可能死循环         │ 无法处理生成失败、无自检                              │
+  ├────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────┤
+  │ 工具依赖       │ 必须绑定 @tool 函数                   │ 不需要                                                │
+  ├────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────┤
+  │ prompt         │ 工具选择策略指导 + 输出格式           │ 完整输出模板 + 字段级约束                             │
+  │ 设计重点       │                                       │                                                       │
+  ├────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────┤
+  │ 失败恢复       │ LLM 看到工具返回错误后自行调整        │ 依赖外部（Supervisor 重路由或 finalize_node           │
+  │                │                                       │ fallback）                                            │
+  └────────────────┴───────────────────────────────────────┴───────────────────────────────────────────────────────┘

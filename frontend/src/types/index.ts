@@ -28,7 +28,7 @@ export interface Hotel {
   address: string
   location?: Location
   price_range: string
-  rating: string
+  rating: number
   distance: string
   type: string
   estimated_cost?: number

@@ -1,17 +1,20 @@
 """
-Weather Agent — 负责查询目的地的天气预报
+Weather Agent — 直接调用高德 API 查询天气预报，无需 LLM 参与
 
 职责：
-1. 根据用户选择的目的地城市查询天气
-2. 处理城市名称（如用户输入简称或别名，尽量用标准名称查询）
-3. 将天气数据格式化后写入 raw_weather
+1. 从 State 读取 city + travel_days
+2. 直接调用 get_weather(city)（底层 HTTP 函数）
+3. 按旅行天数截取结果
+4. 写入 raw_weather
+
+相比 ReAct 模式：减少 2 次 LLM 调用，耗时从 5-10s 降到 <1s。
+纠错能力：高德 API 对模糊城市名（如"帝都"→"北京"）有内部纠错，
+返回空列表时 Supervisor 可降级跳过。
 """
 
-import json
-from langchain_core.tools import BaseTool
 from app.agents.base import BaseAgent
 from app.graph.state import TripState
-from app.tools.amap import query_weather_tool
+from app.tools.amap import get_weather
 
 
 class WeatherAgent(BaseAgent):
@@ -23,81 +26,68 @@ class WeatherAgent(BaseAgent):
     @property
     def description(self) -> str:
         return (
-            "天气查询助手。根据目的地城市查询未来几天的天气预报，"
+            "天气查询助手。直接调用高德 API 获取目的地天气预报，按旅行天数截取。"
             "负责填充 raw_weather 字段。"
         )
 
     @property
     def system_prompt(self) -> str:
-        return """你是天气查询助手。你的任务非常简单：
-
-1. 根据用户提供的目的地城市，调用 query_weather_tool 查询天气
-2. 确保使用正确的城市名称（如用户输入"帝都"，应转换为"北京"）
-3. 查询完成后，输出查询结果摘要
-
-输出格式（必须是有效 JSON）：
-{"city": "城市名", "days_forecast": N, "summary": "天气概况描述", "weather_data": [...]}
-
-其中 weather_data 是原始天气数据。
-
-如果城市名看起来有歧义或可能不存在，请在调用工具之前先确认标准城市名称。"""
+        return ""
 
     @property
-    def tools(self) -> list[BaseTool]:
-        return [query_weather_tool]
+    def tools(self) -> list:
+        return []
 
     @property
     def max_steps(self) -> int:
-        return 2  # 天气查询通常 1 次工具调用即可
+        return 1
 
-    def _build_context_message(self, state: TripState) -> str:
-        """构造天气查询的上下文信息"""
+    def run(self, state: TripState) -> dict:
+        """
+        直接调用 get_weather()，跳过 LLM ReAct 循环
+
+        流程：
+        1. 从 request 提取 city, travel_days
+        2. 调用 get_weather(city)（底层 HTTP，不抛异常）
+        3. 截取 [:travel_days]
+        4. 返回结果
+        """
         request = state.get("request")
         if request is None:
-            return "错误：State 中缺少 request 字段"
-
-        city = getattr(request, "city", "未知")
-        start_date = getattr(request, "start_date", "")
-        end_date = getattr(request, "end_date", "")
-        travel_days = getattr(request, "travel_days", 0)
-
-        return f"""请查询以下城市的天气预报：
-
-目的地城市：{city}
-旅行日期：{start_date} 至 {end_date}（共 {travel_days} 天）
-
-请调用 query_weather_tool 工具查询 {city} 的天气，确保城市名称正确后再调用。"""
-
-    def _parse_final_output(
-        self,
-        state: TripState,
-        llm_content: str,
-        messages: list,
-    ) -> dict:
-        """从 LLM 最终输出中提取天气数据，写入 raw_weather"""
-        try:
-            data = json.loads(llm_content)
-            weather_data = data.get("weather_data", [])
-        except (json.JSONDecodeError, Exception):
-            extracted = self._extract_json(llm_content)
-            if extracted:
-                try:
-                    data = json.loads(extracted)
-                    weather_data = data.get("weather_data", [])
-                except Exception:
-                    weather_data = []
-            else:
-                weather_data = []
-
-        if not weather_data:
             return {
                 "raw_weather": [],
-                "agent_outputs": {self.name: "查询完成但未获取到天气数据"},
+                "error": "State 中缺少 request 字段",
+                "agent_outputs": {self.name: "失败: 缺少 request"},
             }
 
-        summary = f"获取到 {len(weather_data)} 天天气数据"
+        city = getattr(request, "city", "")
+        travel_days = getattr(request, "travel_days", 0)
+
+        if not city:
+            return {
+                "raw_weather": [],
+                "agent_outputs": {self.name: "失败: city 为空"},
+            }
+
+        print(f"\n{'=' * 50}")
+        print(f"🌤️  {self.name} 直接查询天气: city={city}, days={travel_days}")
+        print(f"{'=' * 50}")
+
+        # 直接调用底层 HTTP 函数（不走 @tool / LLM）
+        all_weather = get_weather(city)
+
+        if not all_weather:
+            print(f"  [{self.name}] ⚠️ 未获取到天气数据")
+            return {
+                "raw_weather": [],
+                "agent_outputs": {self.name: f"未获取到 {city} 的天气数据"},
+            }
+
+        # 按旅行天数截取
+        weather = all_weather[:travel_days] if travel_days > 0 else all_weather
+        print(f"  [{self.name}] ✅ 获取 {len(weather)} 天天气")
 
         return {
-            "raw_weather": weather_data,
-            "agent_outputs": {self.name: summary},
+            "raw_weather": weather,
+            "agent_outputs": {self.name: f"获取 {city} {len(weather)} 天天气"},
         }

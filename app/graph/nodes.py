@@ -63,6 +63,7 @@ def initialize_node(state: TripState) -> dict:
         "retry_count": 0,
         "iteration_count": 0,
         "max_iterations": 15,  # P1 优化：减少迭代上限（Supervisor 调用减少）
+        "revision_round": 0,
         "error": "",
         "agent_outputs": {},
         "raw_attractions": state.get("raw_attractions", []),
@@ -232,14 +233,23 @@ def budget_node(state: TripState) -> dict:
     """
     Budget Agent 节点 — 计算预算
 
-    此节点是 planner → budget → supervisor 链的最后一环，
-    完成后返回 Supervisor 做最终决策。
+    此节点是 planner → budget → supervisor 链的最后一环。
+    若检测到超限信号 (OVERSHOOT|)，递增 revision_round。
     """
     print(f"\n💰 [budget_node] 激活 Budget Agent")
     try:
         result = _budget_agent.run(state)
         result["error"] = ""
         result["retry_count"] = 0
+
+        # 检测超限信号 → 递增修正轮数
+        agent_outputs = result.get("agent_outputs", {})
+        budget_value = agent_outputs.get("budget_agent", "")
+        if isinstance(budget_value, str) and budget_value.startswith("OVERSHOOT|"):
+            current_round = state.get("revision_round", 0)
+            result["revision_round"] = current_round + 1
+            print(f"  [budget_node] ⚠️ 超限! revision_round {current_round} → {current_round + 1}")
+
         return result
     except Exception as e:
         error_msg = f"Budget Agent 执行异常: {str(e)}"
@@ -340,7 +350,7 @@ def finalize_node(state: TripState) -> dict:
     if trip_plan is None:
         request = state.get("request")
         if request is not None:
-            trip_plan = _create_fallback_plan(request)
+            trip_plan = _create_fallback_plan(request, state)
             error = (error + "; " if error else "") + "使用备用计划"
             print(f"  🔄 已生成备用计划")
         else:
@@ -385,7 +395,7 @@ def finalize_node(state: TripState) -> dict:
 # ============================================================
 
 def _extract_json(text: str) -> str:
-    """从文本中提取 JSON 字符串"""
+    """从文本中提取 JSON 字符串（括号计数法）"""
     if "```json" in text:
         start = text.find("```json") + 7
         end = text.find("```", start)
@@ -400,38 +410,127 @@ def _extract_json(text: str) -> str:
 
     if "{" in text and "}" in text:
         start = text.find("{")
-        end = text.rfind("}") + 1
-        if end > start:
-            return text[start:end]
+        brace_count = 0
+        end = start
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                brace_count += 1
+            elif ch == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    end = i + 1
+                    break
+        return text[start:end] if end > start else text
 
     raise ValueError("文本中未找到 JSON 数据")
 
 
-def _create_fallback_plan(request) -> "TripPlan":
-    """当所有 Agent 均失败时，生成备用计划"""
-    from app.schemas.models import TripPlan, DayPlan, Attraction, Meal, Location
+def _create_fallback_plan(request, state) -> "TripPlan":
+    """
+    备用计划生成 — 优先使用 Agent 已收集的真实数据
+
+    优先链：
+    raw_attractions 有数据 → 用真实 POI
+    raw_hotels 有数据 → 填充真实酒店
+    raw_weather 有数据 → 填充真实天气
+    都没有 → 硬编码兜底
+    """
+    from app.schemas.models import TripPlan, DayPlan, Attraction, Meal, Location, Hotel, WeatherInfo
 
     start = datetime.strptime(request.start_date, "%Y-%m-%d")
+    raw_attractions = state.get("raw_attractions", [])
+    raw_hotels = state.get("raw_hotels", [])
+    raw_weather = state.get("raw_weather", [])
+
+    # 构建真实景点列表
+    real_attractions: list[Attraction] = []
+    for attr in raw_attractions:
+        lng = attr.get("longitude", 0)
+        lat = attr.get("latitude", 0)
+        real_attractions.append(Attraction(
+            name=attr.get("name", f"{request.city}景点"),
+            address=attr.get("address", f"{request.city}市"),
+            location=Location(
+                longitude=lng if lng else 116.40,
+                latitude=lat if lat else 39.90,
+            ),
+            visit_duration=120,
+            description=attr.get("description", f"{request.city}推荐景点"),
+            category=attr.get("type", "景点"),
+            ticket_price=attr.get("ticket_price", 0),
+        ))
+
+    # 构建真实酒店
+    real_hotel: Hotel | None = None
+    if raw_hotels:
+        h = raw_hotels[0]
+        real_hotel = Hotel(
+            name=h.get("name", "推荐酒店"),
+            address=h.get("address", ""),
+            location=Location(
+                longitude=h.get("longitude", 0) or 116.40,
+                latitude=h.get("latitude", 0) or 39.90,
+            ),
+            price_range="200-500元",
+            rating=h.get("rating", 0),
+            distance="距市中心2公里",
+            type=h.get("type", "酒店"),
+            estimated_cost=300,
+        )
+
+    # 构建真实天气
+    weather_info: list[WeatherInfo] = []
+    for w in raw_weather[:request.travel_days]:
+        weather_info.append(WeatherInfo(
+            date=w.get("date", ""),
+            day_weather=w.get("day_weather", ""),
+            night_weather=w.get("night_weather", ""),
+            day_temp=w.get("day_temp", "0"),
+            night_temp=w.get("night_temp", "0"),
+            wind_direction=w.get("wind_direction", ""),
+            wind_power=w.get("wind_power", ""),
+        ))
+
+    # 如果没有真实景点，回退到硬编码
+    if not real_attractions:
+        for j in range(3):
+            real_attractions.append(Attraction(
+                name=f"{request.city}热门景点{j + 1}",
+                address=f"{request.city}市",
+                location=Location(longitude=116.40 + j * 0.02, latitude=39.90 + j * 0.02),
+                visit_duration=120,
+                description=f"{request.city}的推荐游览地点",
+            ))
+
+    # 按天分配景点
     days = []
+    attr_per_day = max(2, min(3, len(real_attractions) // request.travel_days))
+    attr_idx = 0
 
     for i in range(request.travel_days):
         current = start + timedelta(days=i)
+        day_attractions = []
+        for _ in range(attr_per_day):
+            if attr_idx < len(real_attractions):
+                day_attractions.append(real_attractions[attr_idx])
+                attr_idx += 1
+            else:
+                day_attractions.append(Attraction(
+                    name=f"{request.city}其他景点",
+                    address=f"{request.city}市",
+                    location=Location(longitude=116.40, latitude=39.90),
+                    visit_duration=120,
+                    description="自由探索",
+                ))
+
         days.append(DayPlan(
             date=current.strftime("%Y-%m-%d"),
             day_index=i,
             description=f"第{i + 1}天：探索{request.city}",
             transportation=request.transportation,
             accommodation=request.accommodation,
-            attractions=[
-                Attraction(
-                    name=f"{request.city}热门景点{j + 1}",
-                    address=f"{request.city}市",
-                    location=Location(longitude=116.40 + j * 0.02, latitude=39.90 + j * 0.02),
-                    visit_duration=120,
-                    description=f"{request.city}的推荐游览地点",
-                )
-                for j in range(3)
-            ],
+            hotel=real_hotel if real_hotel and i == 0 else None,
+            attractions=day_attractions,
             meals=[
                 Meal(type="breakfast", name="当地早餐", estimated_cost=30),
                 Meal(type="lunch", name="当地午餐", estimated_cost=50),
@@ -439,14 +538,18 @@ def _create_fallback_plan(request) -> "TripPlan":
             ],
         ))
 
+    real_poi_count = len(raw_attractions)
+    fallback_desc = (
+        f"这是{request.city}{request.travel_days}日游的行程。"
+        f"由于智能规划过程遇到问题，此行程为备用方案（复用了已收集的 {real_poi_count} 个真实景点）。"
+        f"建议提前查看各景点开放时间，并根据实际天气情况调整出行计划。"
+    )
+
     return TripPlan(
         city=request.city,
         start_date=request.start_date,
         end_date=request.end_date,
         days=days,
-        overall_suggestions=(
-            f"这是{request.city}{request.travel_days}日游的自动生成行程。"
-            f"由于智能规划过程遇到问题，此行程为备用方案。建议提前查看各景点开放时间，"
-            f"并根据实际天气情况调整出行计划。"
-        ),
+        weather_info=weather_info,
+        overall_suggestions=fallback_desc,
     )

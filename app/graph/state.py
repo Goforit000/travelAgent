@@ -75,6 +75,7 @@ class TripState(TypedDict):
     retry_count: int
     iteration_count: int
     max_iterations: int
+    revision_round: int  # 预算超限后 planner→budget 修正轮数，最多 2 轮
 
     # ===== 错误信息 =====
     error: str

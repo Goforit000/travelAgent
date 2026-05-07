@@ -7,6 +7,8 @@ POI Agent — 负责智能搜索目的地的景点信息
 3. 调用 search_attractions_tool 执行搜索
 4. 评估搜索结果是否充分，不够则补搜
 5. 合并去重所有搜索结果，写入 raw_attractions
+
+优化：目标收集 travel_days * 4 个景点，达到后立即停止，避免过度搜索浪费 token。
 """
 
 import json
@@ -35,25 +37,26 @@ class POIAgent(BaseAgent):
 
 1. 分析用户的旅行偏好（preferences），制定搜索策略
 2. 调用 search_attractions_tool 对每个偏好关键词分别搜索
-3. 如果第一次搜索返回的结果不够丰富（少于5条），考虑换一个近义词或更具体的关键词再搜
+3. 如果第一次搜索返回的结果不够丰富，换一个近义词或更具体的关键词再搜
 4. 确保搜索结果覆盖了用户的所有偏好类别
 5. 在所有搜索完成后，整理并汇总所有找到的景点
 
 搜索策略指南：
-- 偏好"历史文化" → 搜索"历史文化"、"博物馆"、"古迹"、"寺庙"
-- 偏好"自然风光" → 搜索"自然风光"、"公园"、"山"、"湖"
+- 偏好"历史文化" → 搜索"历史文化景点"、"博物馆"、"古迹"、"寺庙"
+- 偏好"自然风光" → 搜索"自然风光景点"、"公园"、"山"、"湖"
 - 偏好"美食" → 搜索"美食街"、"特色小吃"、"夜市"
-- 偏好"购物" → 搜索"购物中心"、"步行街"、"特产"
+- 偏好"购物" → 搜索"购物中心"、"商业街"、"特产"
 - 偏好"艺术" → 搜索"美术馆"、"艺术区"、"画廊"
 - 偏好"休闲" → 搜索"咖啡馆"、"茶馆"、"SPA"
 
 重要规则：
-- 必须至少搜索一次，最多搜索 4 次（不同关键词）
-- 每次搜索后评估结果，如果返回为空或很少（< 3 条），立即换关键词补搜
-- 如果你认为搜索结果已经充分覆盖了所有偏好，直接输出最终结果
+- 必须至少搜索一次、最多搜索 target_count/2 + 1 次
+- 每次搜索后评估结果，如果返回为空或很少（< 3 条），换关键词补搜
+- 如果已收集的景点数（去重后）达到 target_count，立即停止搜索并输出最终结果
+- 多搜无益，Planner 只使用 target_count 个景点
 - 输出必须是有效 JSON，格式为:
   {"summary": "搜索总结", "keywords_used": ["关键词1", "关键词2"], "total_found": N, "attractions": [...]}
-  其中 attractions 是去重合并后的景点列表（使用之前所有搜索的原始结果）"""
+  其中 attractions 是去重合并后的景点列表"""
 
     @property
     def tools(self) -> list[BaseTool]:
@@ -61,7 +64,7 @@ class POIAgent(BaseAgent):
 
     @property
     def max_steps(self) -> int:
-        return 5  # POI 搜索可能需要多轮
+        return 5
 
     def _build_context_message(self, state: TripState) -> str:
         """构造 POI 搜索的上下文信息"""
@@ -71,11 +74,14 @@ class POIAgent(BaseAgent):
 
         city = getattr(request, "city", "未知")
         preferences = getattr(request, "preferences", [])
+        travel_days = getattr(request, "travel_days", 1)
         free_text = getattr(request, "free_text_input", "")
+        target_count = travel_days * 4
 
         context = f"""请为以下旅行需求搜索景点：
 
 目的地城市：{city}
+旅行天数：{travel_days} 天
 旅行偏好：{', '.join(preferences) if preferences else '无特别偏好（搜索"热门景点"）'}"""
 
         if free_text:
@@ -83,10 +89,11 @@ class POIAgent(BaseAgent):
 
         context += f"""
 
-请首先分析偏好列表，然后对每个偏好分别调用 search_attractions_tool。
 当前偏好关键词列表：{json.dumps(preferences, ensure_ascii=False)}
+如果偏好为空，请用"热门景点"作为关键词搜索。
 
-如果偏好为空，请用"热门景点"作为关键词搜索。"""
+目标收集景点数量：{target_count} 个（每天约 3 个 × {travel_days} 天 + 备用）。
+收集到 {target_count} 个去重景点后立即停止搜索，多搜无益。"""
 
         return context
 
@@ -97,11 +104,14 @@ class POIAgent(BaseAgent):
         messages: list,
     ) -> dict:
         """从 LLM 最终输出中提取景点数据，写入 raw_attractions"""
+        request = state.get("request")
+        travel_days = getattr(request, "travel_days", 1) if request else 1
+        target_count = travel_days * 4
+
         try:
             data = json.loads(llm_content)
             attractions = data.get("attractions", [])
         except (json.JSONDecodeError, Exception):
-            # 尝试用 _extract_json 提取
             extracted = self._extract_json(llm_content)
             if extracted:
                 try:
@@ -127,7 +137,26 @@ class POIAgent(BaseAgent):
                 seen_names.add(name)
                 deduped.append(attr)
 
-        summary = f"共搜索到 {len(deduped)} 个去重景点"
+        # 按评分降序排序
+        def sort_key(item: dict) -> float:
+            rating = item.get("rating", 0)
+            if isinstance(rating, str):
+                try:
+                    return float(rating)
+                except (ValueError, TypeError):
+                    return 0.0
+            if isinstance(rating, (int, float)):
+                return float(rating)
+            return 0.0
+
+        deduped.sort(key=sort_key, reverse=True)
+
+        # 截断到目标数量
+        if len(deduped) > target_count:
+            print(f"  [poi_agent] 景点从 {len(deduped)} 条截断到 {target_count} 条")
+            deduped = deduped[:target_count]
+
+        summary = f"共搜索到 {len(deduped)} 个去重景点（目标 {target_count} 个）"
 
         return {
             "raw_attractions": deduped,

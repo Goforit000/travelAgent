@@ -50,7 +50,7 @@ class Hotel(BaseModel):
     address: str = Field(default="", description="酒店地址")
     location: Optional[Location] = Field(default=None, description="经纬度")
     price_range: str = Field(default="", description="价格范围")
-    rating: str = Field(default="", description="评分")
+    rating: Optional[float] = Field(default=None, description="评分")
     distance: str = Field(default="", description="距景点距离")
     type: str = Field(default="", description="酒店类型")
     estimated_cost: int = Field(default=0, description="预估每晚费用（元）")

@@ -79,7 +79,7 @@ def search_pois(
                 "longitude": lng,
                 "latitude": lat,
                 "tel": item.get("tel", ""),
-                "rating": item.get("biz_ext", {}).get("rating", ""),
+                "rating": item.get("biz_ext", {}).get("rating", 0),
             })
 
         return pois

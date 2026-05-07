@@ -231,10 +231,11 @@
                 </template>
                 <a-descriptions :column="2" size="small">
                   <a-descriptions-item label="地址">{{ day.hotel.address }}</a-descriptions-item>
-                  <a-descriptions-item label="类型">{{ day.hotel.type }}</a-descriptions-item>
-                  <a-descriptions-item label="价格范围">{{ day.hotel.price_range }}</a-descriptions-item>
-                  <a-descriptions-item label="评分">{{ day.hotel.rating }}⭐</a-descriptions-item>
                   <a-descriptions-item label="距离" :span="2">{{ day.hotel.distance }}</a-descriptions-item>
+                  <a-descriptions-item label="类型">{{ day.hotel.type }}</a-descriptions-item>
+                  <a-descriptions-item label="评分">{{ day.hotel.rating }}⭐</a-descriptions-item>
+                  <a-descriptions-item label="价格范围">{{ day.hotel.price_range }}</a-descriptions-item>
+                  <a-descriptions-item label="预估花费">{{ day.hotel.estimated_cost }}元</a-descriptions-item>
                 </a-descriptions>
               </a-card>
 
@@ -244,8 +245,14 @@
                 <a-descriptions-item
                   v-for="meal in day.meals"
                   :key="meal.type"
-                  :label="getMealLabel(meal.type)"
                 >
+                  <!-- 使用 #label 插槽自定义 label 内容 -->
+                  <template #label>
+                    {{ getMealLabel(meal.type) }}
+                    <span v-if="meal.estimated_cost != null" style="margin-left: 8px">
+                      ¥{{ meal.estimated_cost }}
+                    </span>
+                  </template>
                   {{ meal.name }}
                   <span v-if="meal.description"> - {{ meal.description }}</span>
                 </a-descriptions-item>
@@ -329,6 +336,7 @@ onMounted(async () => {
   const data = sessionStorage.getItem('tripPlan')
   if (data) {
     tripPlan.value = JSON.parse(data)
+    console.log(tripPlan.value)
     // 加载景点图片
     await loadAttractionPhotos()
     // 等待DOM渲染完成后初始化地图
@@ -1338,4 +1346,3 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
   }
 }
 </style>
-

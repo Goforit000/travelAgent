@@ -1,0 +1,95 @@
+1. 架构层面
+
+  问题：Supervisor 路由值 "plan" 缺少映射，导致 [Router] next_agent='plan' 无效，返回 Supervisor 重新决策 死循环。
+  解决方案：routing.py 的 AGENT_TO_NODE 新增 "plan": "planner_node"。
+
+  ---
+  问题：agent_outputs 无 reducer，LangGraph 用新值覆盖整个 dict 而非合并，导致 Supervisor 看不到之前 Agent 的完成标记。
+  解决方案：state.py 新增 _merge_dicts 函数，agent_outputs 和 attraction_photos 改为 Annotated[dict, _merge_dicts]。
+
+  ---
+  问题：Supervisor 决策规则依赖 trip_plan（只在 finalize 节点创建，此前始终为 None），导致 Budget→Planner→Budget
+  死循环。
+  解决方案：Supervisor 规则改为基于 agent_outputs 字典追踪各 Agent 完成状态，配合 revision_round 控制预算超限回退次数。
+
+  ---
+  问题：Budget Agent 超限时生成削减建议但不写回行程，前端仍显示超限计划。
+  解决方案：Budget Agent 输出 "OVERSHOOT|{json}" 信号 → Supervisor 检测后路回到 Planner → Planner 根据削减建议修正行程 →
+   Budget 再次验证。职责分离：Budget 算+建议、Planner 改、Supervisor 路由。
+
+  ---
+  2. 性能层面
+
+  问题：Planner Agent 卡在步骤 1/12，实际原因是单次 LLM 调用负载过大（超长 system_prompt + 全部 raw 数据 JSON dump +
+  要求一次生成完整行程），qwen 处理超时。
+  解决方案：改为单次 Prompt-Response 模式（移除 ReAct 循环），数据用编号格式化文本替代 json.dumps，prompt 内联完整 JSON
+  模板，设置 max_tokens=6144 + request_timeout=180s。
+
+  ---
+  问题：Planner 输入 token 膨胀（raw_attractions 全量 JSON），LLM 处理慢。
+  解决方案：Planner 上下文裁剪——景点按评分取 top travel_days*4 条，酒店取 top 5
+  条，天气只取旅行天数范围；数据格式化为编号文本列表。
+
+  ---
+  问题：每次请求 LLM 调用 16-26 次，总耗时 60-180s。
+  解决方案：Supervisor 减频（从每 Agent 后调用改为仅 3 个阶段切换点介入，~6 次→~3 次）+
+  数据收集并行化（POI+Weather+Hotel 用 ThreadPoolExecutor 并行执行）+ planner→budget 直接链式不经过 Supervisor。
+
+  ---
+  问题：Weather Agent 使用 ReAct 循环（2 次 LLM 调用 + 1 次 HTTP）处理简单天气查询，浪费 5-10s。
+  解决方案：Weather Agent 改为直接调用 get_weather(city)→截取 [:travel_days]，0 次 LLM 调用。
+
+  ---
+  问题：POI Agent 过度搜索（每个偏好多轮搜索→15-30 条景点），Planner 只用到 6-9 条，浪费 6-24s 和 token。
+  解决方案：POI system_prompt 新增目标数量约束 travel_days * 4，"达到后立即停止"；_parse_final_output 去重后按评分截断。
+
+  ---
+  3. 数据质量层面
+
+  问题：LLM 生成的行程 JSON 缺必填字段（description/transportation/accommodation/visit_duration 等），Pydantic 校验 28
+  个错误→降级到备用计划。
+  解决方案：Planner 改为单次 Prompt-Response 模式，system_prompt 内联完整 JSON schema 强制 LLM
+  填写每个字段；validate_itinerary_tool 补全 8 项 Pydantic 必填字段检查。
+
+  ---
+  问题：validate_itinerary_tool 报 'str' object has no attribute 'get'——LLM 将嵌套对象简化为字符串。
+  解决方案：itinerary_tools.py 和 budget_tools.py 所有嵌套字段访问前增加 isinstance 类型防御；Planner system_prompt
+  新增"禁止将对象简化为字符串"硬约束。
+
+  ---
+  问题：同天规划的景点距离过远（如故宫和长城在同一天）。
+  解决方案：planner_agent.py 新增 _greedy_cluster()（半正矢公式 + 贪心聚类，区域数≈travel_days），_format_attractions()
+  改为按区域分组输出"### 故宫及周边（5个景点）"，system_prompt 新增"每天景点必须来自同一区域"规则。
+
+  ---
+  问题：Fallback 计划硬编码北京坐标，忽略已收集的真实 POI/酒店/天气数据。
+  解决方案：_create_fallback_plan 新增 state 参数，优先复用 raw_attractions（真实
+  name/address/location）、raw_hotels[0]、raw_weather，全部为空才回退硬编码。
+
+  ---
+  问题：Hotel.rating 类型不匹配——Pydantic 期望 str，LLM 生成 float(4.1) → 校验失败 → 降级 fallback。
+  解决方案：Hotel.rating 改为 Optional[float]（与 Attraction.rating 一致）。
+
+  ---
+  4. 前端层面
+
+  问题：导出图片/PDF 时地图不显示。
+  解决方案：地图截图发生在 DOM 元素离屏（left:-9999px）之后，WebGL canvas 像素已清空。改为先在地图可见时用 html2canvas
+  捕获，再注入导出容器。
+
+  ---
+  问题：导出地图只有标记没有街道/建筑瓦片。
+  解决方案：Amap JS API v2.0 使用 WebGL 渲染，canvas.toDataURL() 返回空白。切换为 v1.4.15（DOM 渲染，html2canvas
+  可直接捕获全部内容）。
+
+  ---
+  问题：Result.vue 编辑模式下移动/删除景点失效。
+  解决方案：splice 和数组解构交换虽改变数据但 <a-list> 组件未检测到引用变化。改为创建新数组引用：filter 删除 + [...attr]
+   交换 + { ...day, attractions: newArr } 写入。
+
+  ---
+  5. 数据模型层面
+
+  问题：base.py 和 planner_agent.py 和 nodes.py 三处重复实现 _extract_json，base 版用 rfind("}") 精度不足。
+  解决方案：升级 base.py _extract_json 为括号计数法（全局受益），删除 planner_agent.py 重复版本，统一调用
+  self._extract_json()。

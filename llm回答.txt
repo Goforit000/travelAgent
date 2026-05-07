@@ -1,0 +1,72 @@
+{
+  "city": "沈阳",
+  "start_date": "2026-05-09",
+  "end_date": "2026-05-09",
+  "days": [
+    {
+      "date": "2026-05-09",
+      "day_index": 0,
+      "description": "游览沈阳故宫博物院及周边历史景点，感受盛京历史文化底蕴。",
+      "transportation": "公共交通",
+      "accommodation": "经济型酒店",
+      "hotel": {
+        "name": "一家小居精选公寓(沈阳大学店)",
+        "address": "联合路42-1号熙旺广场C座",
+        "location": {"longitude": 123.455821, "latitude": 41.819506},
+        "price_range": "100-200元",
+        "rating": 4.9,
+        "distance": "距离沈阳故宫约2.5公里",
+        "type": "经济型公寓",
+        "estimated_cost": 168
+      },
+      "attractions": [
+        {
+          "name": "沈阳故宫博物院",
+          "address": "沈阳路171号",
+          "location": {"longitude": 123.455677, "latitude": 41.798387},
+          "visit_duration": 150,
+          "description": "中国仅存的两大宫殿建筑群之一，清朝初期的皇宫，历史文化价值极高。",
+          "category": "历史古迹",
+          "ticket_price": 60
+        },
+        {
+          "name": "张学良旧居陈列馆",
+          "address": "朝阳街少帅府巷46号",
+          "location": {"longitude": 123.457791, "latitude": 41.794058},
+          "visit_duration": 120,
+          "description": "又称大帅府，是张作霖及其长子张学良的官邸和私宅，建筑风格独特。",
+          "category": "历史名人故居",
+          "ticket_price": 48
+        },
+        {
+          "name": "辽宁省博物馆",
+          "address": "智慧三街157号",
+          "location": {"longitude": 123.460464, "latitude": 41.678023},
+          "visit_duration": 180,
+          "description": "新中国建立的第一座博物馆，藏品丰富，尤以书画、青铜器著称。",
+          "category": "综合博物馆",
+          "ticket_price": 0
+        }
+      ],
+      "meals": [
+        {"type": "breakfast", "name": "老边饺子", "description": "沈阳著名特色小吃，皮薄馅大，口味鲜美。", "estimated_cost": 35},
+        {"type": "lunch", "name": "李连贵熏肉大饼", "description": "当地传统名吃，熏肉肥而不腻，大饼外酥里嫩。", "estimated_cost": 50},
+        {"type": "dinner", "name": "鸡架抻面", "description": "沈阳特色的街头美食，鸡架甜辣入味，抻面劲道。", "estimated_cost": 45}
+      ]
+    }
+  ],
+  "weather_info": [
+    {
+      "date": "2026-05-09", "day_weather": "晴", "night_weather": "晴",
+      "day_temp": 21, "night_temp": 7, "wind_direction": "西北", "wind_power": "1-3级"
+    }
+  ],
+  "overall_suggestions": "今日行程主要集中在沈阳故宫周边区域，建议穿着舒适的运动鞋。辽宁省博物馆距离市区稍远，建议合理安排时间，下午前往参观。沈阳春季早晚温差较大，注意保暖。",
+  "budget": {
+    "total_attractions": 108,
+    "total_hotels": 168,
+    "total_meals": 130,
+    "total_transportation": 30,
+    "total": 436
+  }
+}
