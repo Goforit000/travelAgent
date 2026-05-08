@@ -150,7 +150,7 @@ def get_weather(city: str) -> list[dict]:
 def search_attractions_tool(
     keywords: str,
     city: str,
-    offset: int = 5,
+    offset: int = 10,
 ) -> str:
     """
     在高德地图中搜索景点信息。
@@ -182,7 +182,7 @@ def search_attractions_tool(
 def search_hotels_tool(
     keywords: str,
     city: str,
-    offset: int = 5,
+    offset: int = 10,
 ) -> str:
     """
     在高德地图中搜索酒店信息。

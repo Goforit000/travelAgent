@@ -26,11 +26,11 @@ PLANNER_SYSTEM_PROMPT = """你是一个专业的旅行规划师。
 1. 从可用景点中选择合适的景点，每天安排 2-4 个
 2. 使用景点列表中提供的真实坐标
 3. 为每天安排早餐、午餐、晚餐（各一餐）
-4. 推荐合适的酒店
+4. 每天的酒店从当天景点区域下的"附近酒店"中选取。
+   不同区域的天必须选不同的酒店（即使房价相近）。
 5. 生成合理的预算估算
 6. 每天的景点必须来自同一区域分组（同一"### 区域名"下的景点）。
-   不同天的景点可以来自不同区域，但同一天内不能跨区域选景点。
-   景点已按空间距离分组，每天只需从一个分组中选取即可。
+   不要跨区域选景点。景点已按空间距离分组并附带了附近酒店列表。
 
 请严格按照以下 JSON 格式输出，不要添加任何其他内容，不要用 markdown 代码块:
 
@@ -200,10 +200,8 @@ class PlannerAgent(BaseAgent):
         raw_weather = state.get("raw_weather", [])
         raw_hotels = state.get("raw_hotels", [])
 
-        pois_info = _format_attractions(raw_attractions, travel_days)
-        print(f"位置：{pois_info}")
+        pois_info = _format_attractions(raw_attractions, travel_days, raw_hotels)
         weather_info = _format_weather(raw_weather, travel_days)
-        hotels_info = _format_hotels(raw_hotels)
 
         prompt = f"""## 基本信息
 - 城市: {city}
@@ -218,14 +216,11 @@ class PlannerAgent(BaseAgent):
 
         prompt += f"""
 
-## 可用景点 (POI) — 已按区域分组，每天只从一个区域选景点
+## 可用景点 — 已按区域分组（每区含附近酒店）
 {pois_info}
 
 ## 天气预报
-{weather_info}
-
-## 可用酒店
-{hotels_info}"""
+{weather_info}"""
 
         # 预算修正模式附加信息
         phase = state.get("phase", "")
@@ -272,24 +267,33 @@ class PlannerAgent(BaseAgent):
 # 数据格式化函数
 # ============================================================
 
-def _format_attractions(attractions: list[dict], travel_days: int) -> str:
-    """格式化景点为按区域分组的编号文本 — 贪心聚类，区域数 ≈ travel_days"""
+def _format_attractions(attractions: list[dict], travel_days: int, hotels: list[dict] | None = None) -> str:
+    """格式化景点为按区域分组的编号文本 — 每区附加最近的酒店，LLM 直接在本区内选择"""
     if not attractions:
         return "暂无景点信息，请根据常识为城市生成合适的景点。"
 
     clusters = _greedy_cluster(attractions, target_clusters=max(1, travel_days))
     print(f"  [planner_agent] 贪心聚类: {len(attractions)} 个景点 → {len(clusters)} 个区域")
-    print(f"  [planner_agent] 聚类结果: {clusters} 区域")
+
+    # 为每个 cluster 挂载最近的酒店
+    if hotels:
+        for cluster in clusters:
+            cluster["hotels"] = _find_nearest_hotels(cluster, hotels, top_n=2)
+        hotel_count = sum(len(c.get("hotels", [])) for c in clusters)
+        print(f"  [planner_agent] 酒店挂载: {len(hotels)} 个酒店 → {hotel_count} 个分配")
 
     lines: list[str] = []
     global_index = 0
     for cluster in clusters:
         name = cluster["name"]
         items = cluster["items"]
+        nearby_hotels = cluster.get("hotels", [])
+        hotel_count_str = f" + {len(nearby_hotels)} 家附近酒店" if nearby_hotels else ""
+
         if len(clusters) > 1:
-            lines.append(f"### {name}（{len(items)} 个景点）")
+            lines.append(f"### {name}（{len(items)} 个景点{hotel_count_str}）")
         else:
-            lines.append(f"### 主要景点（{len(items)} 个景点）")
+            lines.append(f"### 主要景点（{len(items)} 个景点{hotel_count_str}）")
 
         for poi in items:
             global_index += 1
@@ -310,9 +314,67 @@ def _format_attractions(attractions: list[dict], travel_days: int) -> str:
                 lines.append(f"     门票: {ticket}元")
             if desc:
                 lines.append(f"     简介: {desc}")
+
+        # 输出本区域附近酒店
+        if nearby_hotels:
+            lines.append(f"  附近酒店（供本区域选择）:")
+            for h in nearby_hotels:
+                hotel_name = h.get("name", "未知")
+                h_lng = h.get("longitude", 0)
+                h_lat = h.get("latitude", 0)
+                h_rating = h.get("rating", 0)
+                h_price = h.get("price_range", "")
+                h_type = h.get("type", "")
+                h_addr = h.get("address", "")
+                h_dist = h.get("_distance_km", 0)
+
+                lines.append(f"    - {hotel_name} | 坐标({h_lng}, {h_lat}) | 距区域中心 {h_dist:.1f}km")
+                if h_rating:
+                    lines.append(f"      评分: {h_rating}")
+                if h_price:
+                    lines.append(f"      价格: {h_price}")
+                if h_type:
+                    lines.append(f"      类型: {h_type}")
+                if h_addr:
+                    lines.append(f"      地址: {h_addr}")
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _find_nearest_hotels(cluster: dict, hotels: list[dict], top_n: int = 2) -> list[dict]:
+    """找到离 cluster 中心最近的 top_n 个酒店"""
+    import math
+
+    # 计算 cluster 中心
+    items = cluster["items"]
+    if not items:
+        return []
+    center_lng = sum(float(h.get("longitude", 0)) for h in items) / len(items)
+    center_lat = sum(float(h.get("latitude", 0)) for h in items) / len(items)
+
+    def dist_km(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
+        r = 6371.0
+        dlat = math.radians(lat2 - lat1)
+        dlng = math.radians(lng2 - lng1)
+        a = (math.sin(dlat / 2) ** 2 +
+             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+             math.sin(dlng / 2) ** 2)
+        return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    scored: list[dict] = []
+    for h in hotels:
+        h_lng = float(h.get("longitude", 0))
+        h_lat = float(h.get("latitude", 0))
+        if h_lng == 0 and h_lat == 0:
+            continue
+        d = dist_km(center_lng, center_lat, h_lng, h_lat)
+        entry = dict(h)
+        entry["_distance_km"] = d
+        scored.append(entry)
+
+    scored.sort(key=lambda x: x["_distance_km"])
+    return scored[:top_n]
 
 
 def _greedy_cluster(
@@ -420,29 +482,37 @@ def _format_hotels(hotels: list[dict]) -> str:
     if not hotels:
         return "暂无酒店信息，请根据常识推荐合适的酒店。"
 
-    limit = 5
-    items = hotels[:limit]
+    # 按空间聚类分组，与景点区域格式一致（LLM 可据此为每天选对应区域的酒店）
+    clusters = _greedy_cluster(hotels, target_clusters=min(len(hotels), 3), min_threshold_km=2.0, max_threshold_km=20.0)
+    print(f"  [planner_agent] 酒店聚类: {len(hotels)} 个酒店 → {len(clusters)} 个区域")
 
-    lines = []
-    for i, h in enumerate(items, 1):
-        name = h.get("name", "未知")
-        address = h.get("address", "")
-        rating = h.get("rating", 0)
-        price = h.get("price_range", "")
-        htype = h.get("type", "")
-        lng = h.get("longitude", 0)
-        lat = h.get("latitude", 0)
+    lines: list[str] = []
+    for cluster in clusters:
+        name = cluster["name"]
+        items = cluster["items"]
+        if len(clusters) > 1:
+            lines.append(f"### {name}（{len(items)} 个酒店）")
+        else:
+            lines.append(f"### 酒店（{len(items)} 个）")
 
-        lines.append(f"{i}. {name}")
-        if address:
-            lines.append(f"   地址: {address}")
-        if rating:
-            lines.append(f"   评分: {rating}")
-        if price:
-            lines.append(f"   价格: {price}")
-        if htype:
-            lines.append(f"   类型: {htype}")
-        lines.append(f"   坐标: ({lng}, {lat})")
+        for h in items:
+            hotel_name = h.get("name", "未知")
+            address = h.get("address", "")
+            rating = h.get("rating", 0)
+            price = h.get("price_range", "")
+            htype = h.get("type", "")
+            lng = h.get("longitude", 0)
+            lat = h.get("latitude", 0)
+
+            lines.append(f"  - {hotel_name} | 坐标({lng}, {lat})")
+            if rating:
+                lines.append(f"    评分: {rating}")
+            if price:
+                lines.append(f"    价格: {price}")
+            if htype:
+                lines.append(f"    类型: {htype}")
+            if address:
+                lines.append(f"    地址: {address}")
         lines.append("")
 
     return "\n".join(lines)
@@ -491,6 +561,7 @@ def _get_revision_prompt(state: TripState) -> str:
 7. 每天仍保持 2-3 个景点，三餐不缺
 8. budget 字段必须重新计算，total 必须 ≤ {target_budget}
 9. 景点仍须来自同一区域分组
+10. 不同区域的天必须选不同酒店，酒店须与当天景点区域匹配
 
 ## 输出格式
 与首次规划完全相同，输出完整 JSON（包含 city/start_date/end_date/days/weather_info/overall_suggestions/budget 全部字段）。
