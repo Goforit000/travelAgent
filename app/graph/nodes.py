@@ -395,34 +395,12 @@ def finalize_node(state: TripState) -> dict:
 # ============================================================
 
 def _extract_json(text: str) -> str:
-    """从文本中提取 JSON 字符串（括号计数法）"""
-    if "```json" in text:
-        start = text.find("```json") + 7
-        end = text.find("```", start)
-        if end > start:
-            return text[start:end].strip()
-
-    if "```" in text:
-        start = text.find("```") + 3
-        end = text.find("```", start)
-        if end > start:
-            return text[start:end].strip()
-
-    if "{" in text and "}" in text:
-        start = text.find("{")
-        brace_count = 0
-        end = start
-        for i, ch in enumerate(text[start:], start):
-            if ch == "{":
-                brace_count += 1
-            elif ch == "}":
-                brace_count -= 1
-                if brace_count == 0:
-                    end = i + 1
-                    break
-        return text[start:end] if end > start else text
-
-    raise ValueError("文本中未找到 JSON 数据")
+    """从文本中提取 JSON 字符串 — 委托给共享工具函数"""
+    from app.utils.json_utils import extract_json
+    result = extract_json(text)
+    if result is None:
+        raise ValueError("文本中未找到 JSON 数据")
+    return result
 
 
 def _create_fallback_plan(request, state) -> "TripPlan":

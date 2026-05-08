@@ -16,10 +16,10 @@ Multi-Agent 重构变更：
 - 保留原 get_chat_model() 用于简单调用
 """
 
-from typing import Optional, Sequence
+from typing import Sequence
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
-from app.config import settings
+from app.utils.config import settings
 
 # 模块级缓存，避免重复创建
 _chat_model: ChatOpenAI | None = None

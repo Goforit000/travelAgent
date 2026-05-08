@@ -8,7 +8,7 @@ POI Agent — 负责智能搜索目的地的景点信息
 4. 评估搜索结果是否充分，不够则补搜
 5. 合并去重所有搜索结果，写入 raw_attractions
 
-优化：目标收集 travel_days * 4 个景点，达到后立即停止，避免过度搜索浪费 token。
+优化：目标收集 travel_days * 5 个景点，达到后立即停止，避免过度搜索浪费 token。
 """
 
 import json
@@ -76,7 +76,7 @@ class POIAgent(BaseAgent):
         preferences = getattr(request, "preferences", [])
         travel_days = getattr(request, "travel_days", 1)
         free_text = getattr(request, "free_text_input", "")
-        target_count = travel_days * 4
+        target_count = travel_days * 5
 
         context = f"""请为以下旅行需求搜索景点：
 
@@ -106,7 +106,7 @@ class POIAgent(BaseAgent):
         """从 LLM 最终输出中提取景点数据，写入 raw_attractions"""
         request = state.get("request")
         travel_days = getattr(request, "travel_days", 1) if request else 1
-        target_count = travel_days * 4
+        target_count = travel_days * 5
 
         try:
             data = json.loads(llm_content)

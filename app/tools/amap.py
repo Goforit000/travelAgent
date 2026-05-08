@@ -14,7 +14,7 @@ import json
 
 import httpx
 from langchain_core.tools import tool
-from app.config import settings
+from app.utils.config import settings
 
 # 高德地图 Web API 的基础地址
 AMAP_BASE_URL = "https://restapi.amap.com/v3"

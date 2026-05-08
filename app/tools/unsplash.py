@@ -24,7 +24,7 @@ Unsplash API 接口：
 """
 
 import httpx
-from app.config import settings
+from app.utils.config import settings
 
 UNSPLASH_BASE_URL = "https://api.unsplash.com"
 
