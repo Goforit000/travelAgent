@@ -1,16 +1,9 @@
 """
 LangGraph 节点函数 — 将 Agent 包装为 StateGraph 可调用的节点
 
-P1 优化变更：
-- 新增 data_collection_node：并行运行 POI + Weather + Hotel，减少 4 次 Supervisor 调用
-- planner_node → budget_node 链式执行（workflow 层处理），中间不回 Supervisor
-- Supervisor 仅在 3 个阶段切换点介入：collect → plan → finalize
-
-拓扑结构（优化后）：
-  initialize → supervisor → (条件路由)
-    ├─ "collect"  → data_collection_node → supervisor
-    ├─ "plan"     → planner_node → budget_node → supervisor
-    └─ "finalize" → finalize_node → END
+Planner-Centric Pipeline 架构：
+  initialize → data_collection(POI+Weather+Hotel并行) → planner → budget → (条件) → finalize
+路由由 workflow_router 执行
 """
 
 import json
@@ -20,14 +13,12 @@ from app.graph.state import TripState
 from app.tools.unsplash import get_photo_url
 
 # ——— Agent 实例（模块级单例）———
-from app.agents.supervisor import SupervisorAgent
 from app.agents.poi_agent import POIAgent
 from app.agents.weather_agent import WeatherAgent
 from app.agents.hotel_agent import HotelAgent
 from app.agents.planner_agent import PlannerAgent
 from app.agents.budget_agent import BudgetAgent
 
-_supervisor = SupervisorAgent()
 _poi_agent = POIAgent()
 _weather_agent = WeatherAgent()
 _hotel_agent = HotelAgent()
@@ -46,7 +37,6 @@ def initialize_node(state: TripState) -> dict:
         return {
             "error": "缺少 request 参数",
             "phase": "done",
-            "next_agent": "finalize",
         }
 
     city = getattr(request, "city", "")
@@ -58,11 +48,9 @@ def initialize_node(state: TripState) -> dict:
 
     return {
         "phase": "collect",
-        "next_agent": "",
-        "last_agent": "",
         "retry_count": 0,
         "iteration_count": 0,
-        "max_iterations": 15,  # P1 优化：减少迭代上限（Supervisor 调用减少）
+        "max_iterations": 10,
         "revision_round": 0,
         "error": "",
         "agent_outputs": {},
@@ -76,38 +64,16 @@ def initialize_node(state: TripState) -> dict:
 
 
 # ============================================================
-# 节点 1：Supervisor
-# ============================================================
-
-def supervisor_node(state: TripState) -> dict:
-    """
-    Supervisor 节点 — 阶段级路由决策
-
-    P1 优化：Supervisor 只在 3 个阶段切换点被调用：
-    1. 工作流开始 → 决定 "collect"
-    2. 数据收集完成 → 决定 "plan"
-    3. 规划+预算完成 → 决定 "finalize"
-    """
-    return _supervisor.run(state)
-
-
-# ============================================================
-# 节点 2：数据收集（P1 新增 — 并行 POI + Weather + Hotel）
+# 节点 1：数据收集（并行 POI + Weather + Hotel）
 # ============================================================
 
 def data_collection_node(state: TripState) -> dict:
     """
     数据收集节点 — 并行运行 POI、Weather、Hotel 三个 Agent
 
-    P1 优化核心：
-    - 三个 Agent 之间无数据依赖（都只需要 request.city）
-    - 用 ThreadPoolExecutor 并行执行，总耗时 = max(单 Agent 耗时) 而非 sum
-    - 三个 Agent 全部完成后，汇总结果一次性返回给 Supervisor
-    - 避免了中间 4 次 Supervisor 调用（原来每个 Agent 前后各一次）
-
-    错误处理：
-    - 单个 Agent 失败不影响其他 Agent 继续执行
-    - 所有失败信息汇总到 error 字段，Supervisor 据此决定降级策略
+    - 并行执行，总耗时 = max(单 Agent 耗时)
+    - 初次失败或返回空 → 自动重试 1 次（调用单 Agent 节点函数）
+    - 重试仍失败/空 → 交由 Planner LLM 常识补全
     """
     print(f"\n{'=' * 60}")
     print(f"📦 [data_collection_node] 并行数据收集开始 (POI + Weather + Hotel)")
@@ -120,9 +86,8 @@ def data_collection_node(state: TripState) -> dict:
         "agent_outputs": dict(state.get("agent_outputs", {})),
         "error": "",
     }
-    errors: list[str] = []
 
-    # 定义三个 Agent 的执行函数（捕获异常到返回值中）
+    # —— 第一轮：并行执行 ——
     def run_poi():
         try:
             print(f"  📍 POI Agent 开始...")
@@ -147,51 +112,67 @@ def data_collection_node(state: TripState) -> dict:
             print(f"  ❌ Hotel Agent 异常: {e}")
             return {"error": f"Hotel Agent: {e}", "agent_outputs": {"hotel_agent": f"失败: {e}"}}
 
-    # 并行执行
+    round1_results: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {
             executor.submit(run_poi): "poi",
             executor.submit(run_weather): "weather",
             executor.submit(run_hotel): "hotel",
         }
-
         for future in as_completed(futures):
             agent_name = futures[future]
             try:
-                agent_result = future.result()
-
-                # 合并 agent_outputs
-                if "agent_outputs" in agent_result:
-                    results["agent_outputs"].update(agent_result["agent_outputs"])
-
-                # 合并数据
-                if agent_name == "poi" and "raw_attractions" in agent_result:
-                    results["raw_attractions"] = agent_result["raw_attractions"]
-                    count = len(agent_result["raw_attractions"])
-                    print(f"  ✅ POI Agent 完成: {count} 个景点")
-
-                elif agent_name == "weather" and "raw_weather" in agent_result:
-                    results["raw_weather"] = agent_result["raw_weather"]
-                    count = len(agent_result["raw_weather"])
-                    print(f"  ✅ Weather Agent 完成: {count} 天天气")
-
-                elif agent_name == "hotel" and "raw_hotels" in agent_result:
-                    results["raw_hotels"] = agent_result["raw_hotels"]
-                    count = len(agent_result["raw_hotels"])
-                    print(f"  ✅ Hotel Agent 完成: {count} 个酒店")
-
-                # 收集错误
-                if agent_result.get("error"):
-                    errors.append(agent_result["error"])
-
+                round1_results[agent_name] = future.result()
             except Exception as e:
                 print(f"  ❌ {agent_name} 线程异常: {e}")
-                errors.append(f"{agent_name}: {e}")
+                round1_results[agent_name] = {"error": f"{agent_name}: {e}"}
 
-    # 汇总错误
+    # 合并第一轮结果 + 记录需要重试的 Agent
+    retry_agents: list[str] = []
+    for agent_name in ["poi", "weather", "hotel"]:
+        agent_result = round1_results.get(agent_name, {})
+        if "agent_outputs" in agent_result:
+            results["agent_outputs"].update(agent_result["agent_outputs"])
+        key_map = {"poi": "raw_attractions", "weather": "raw_weather", "hotel": "raw_hotels"}
+        data_key = key_map[agent_name]
+        if data_key in agent_result:
+            results[data_key] = agent_result[data_key]
+            count = len(agent_result[data_key])
+            print(f"  ✅ 第1轮 {agent_name} 完成: {count} 条")
+        else:
+            results[data_key] = []
+            print(f"  ⚠️ 第1轮 {agent_name} 失败或无数据")
+
+        # 判断是否需要重试：异常 或 返回空数据
+        has_error = bool(agent_result.get("error"))
+        has_data = bool(agent_result.get(data_key))
+        if has_error or not has_data:
+            retry_agents.append(agent_name)
+
+    # —— 第二轮：逐一重试失败的 Agent ——
+    retry_map = {"poi": (poi_node, "raw_attractions"), "weather": (weather_node, "raw_weather"), "hotel": (hotel_node, "raw_hotels")}
+    errors: list[str] = []
+    for agent_name in retry_agents:
+        print(f"  🔄 重试 {agent_name}...")
+        node_func, data_key = retry_map[agent_name]
+        try:
+            retry_result = node_func(state)
+            if "agent_outputs" in retry_result:
+                results["agent_outputs"].update(retry_result["agent_outputs"])
+            if data_key in retry_result and retry_result[data_key]:
+                results[data_key] = retry_result[data_key]
+                print(f"  ✅ 重试 {agent_name} 成功: {len(retry_result[data_key])} 条")
+            else:
+                print(f"  ⚠️ 重试 {agent_name} 仍无数据，交由 Planner 常识补全")
+                if retry_result.get("error"):
+                    errors.append(retry_result["error"])
+        except Exception as e:
+            print(f"  ❌ 重试 {agent_name} 异常: {e}，交由 Planner 常识补全")
+            errors.append(f"重试{agent_name}: {e}")
+
     if errors:
         results["error"] = "; ".join(errors)
-        print(f"  ⚠️ 数据收集阶段错误: {results['error']}")
+        print(f"  ⚠️ 数据收集错误: {results['error']}")
 
     total_attractions = len(results["raw_attractions"])
     total_hotels = len(results["raw_hotels"])
@@ -204,7 +185,7 @@ def data_collection_node(state: TripState) -> dict:
 
 
 # ============================================================
-# 节点 3-4：规划 + 预算（链式执行，中间不回 Supervisor）
+# 节点 3-4：规划 + 预算（链式执行）
 # ============================================================
 
 def planner_node(state: TripState) -> dict:
@@ -224,7 +205,6 @@ def planner_node(state: TripState) -> dict:
         print(f"❌ [planner_node] {error_msg}")
         return {
             "error": error_msg,
-            "last_agent": "planner",
             "agent_outputs": {"planner_agent": f"执行失败: {str(e)}"},
         }
 
@@ -233,7 +213,7 @@ def budget_node(state: TripState) -> dict:
     """
     Budget Agent 节点 — 计算预算
 
-    此节点是 planner → budget → supervisor 链的最后一环。
+    此节点是 planner → budget 链的最后一环，完成后由 workflow_router 决定下一步。
     若检测到超限信号 (OVERSHOOT|)，递增 revision_round。
     """
     print(f"\n💰 [budget_node] 激活 Budget Agent")
@@ -256,7 +236,6 @@ def budget_node(state: TripState) -> dict:
         print(f"❌ [budget_node] {error_msg}")
         return {
             "error": error_msg,
-            "last_agent": "budget",
             "agent_outputs": {"budget_agent": f"执行失败: {str(e)}"},
         }
 
@@ -276,7 +255,6 @@ def poi_node(state: TripState) -> dict:
     except Exception as e:
         return {
             "error": f"POI Agent: {str(e)}",
-            "last_agent": "poi",
             "agent_outputs": {"poi_agent": f"重试失败: {str(e)}"},
         }
 
@@ -292,7 +270,6 @@ def weather_node(state: TripState) -> dict:
     except Exception as e:
         return {
             "error": f"Weather Agent: {str(e)}",
-            "last_agent": "weather",
             "agent_outputs": {"weather_agent": f"重试失败: {str(e)}"},
         }
 
@@ -308,7 +285,6 @@ def hotel_node(state: TripState) -> dict:
     except Exception as e:
         return {
             "error": f"Hotel Agent: {str(e)}",
-            "last_agent": "hotel",
             "agent_outputs": {"hotel_agent": f"重试失败: {str(e)}"},
         }
 
@@ -386,7 +362,6 @@ def finalize_node(state: TripState) -> dict:
         "attraction_photos": attraction_photos,
         "error": error,
         "phase": "done",
-        "next_agent": "",
     }
 
 

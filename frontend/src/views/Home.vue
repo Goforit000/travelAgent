@@ -280,7 +280,6 @@ const budgetMarks: Record<number, string> = {
 // 图标映射
 const agentIcons: Record<string, string> = {
   '初始化': '⚡',
-  '调度中心': '🧠',
   '数据收集 (景点+天气+酒店)': '📦',
   '景点搜索': '📍',
   '天气查询': '🌤️',

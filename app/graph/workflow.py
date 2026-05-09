@@ -1,10 +1,7 @@
 """
-LangGraph 工作流组装 — 多 Agent 协作的 Supervisor 架构（P1 优化版）
+LangGraph 工作流组装 — Planner-Centric Pipeline 架构
 
-优化变更：
-1. Supervisor 减频：仅 3 个阶段切换点介入（collect / plan / finalize）
-2. 数据收集并行：data_collection_node 内 ThreadPoolExecutor 并行执行 POI+Weather+Hotel
-3. 链式规划：planner → budget 直接串联，中间不回 Supervisor
+确定性管道 + 唯一条件回路（预算超限回退修正）
 
 拓扑结构：
 
@@ -14,119 +11,75 @@ LangGraph 工作流组装 — 多 Agent 协作的 Supervisor 架构（P1 优化�
                initialize_node
                       │
                       ▼
-               supervisor_node ◄──────────────────────┐
-                      │                               │
-                      │ (add_conditional_edges)        │
-                      │ supervisor_router()            │
-                      │                               │
-          ┌───────────┼───────────────┐               │
-          ▼           ▼               ▼               │
-   data_collection  planner      finalize_node        │
-   _node            _node            │                │
-   (POI+Weather     │               END               │
-    +Hotel 并行)    │                                 │
-          │         ▼                                 │
-          │    budget_node                            │
-          │         │                                 │
-          └─────────┴─────────────────────────────────┘
-               (add_edge, 无条件返回 supervisor)
+            data_collection_node
+           (POI + Weather + Hotel
+                ThreadPoolExecutor 并行)
+                      │
+                      ▼
+               planner_node
+                      │
+                      ▼
+               budget_node
+                      │
+                      │ (add_conditional_edges)
+                      │ workflow_router()
+                      │
+          ┌───────────┴───────────┐
+          ▼                       ▼
+    planner_node            finalize_node
+    (预算修正回路,               │
+     revision_round < 3)        END
 
 规则：
-1. data_collection_node 并行执行 POI+Weather+Hotel，完成后返回 supervisor
-2. planner_node → budget_node 链式执行，plan 阶段内不回 supervisor
-3. budget_node 完成后返回 supervisor（此时 planner+budget 都已完成）
-4. 单 Agent 节点（poi/weather/hotel）保留用于错误重试
+1. data_collection_node 内部并行 POI+Weather+Hotel，完成后直接进 planner
+2. planner → budget 链式执行
+3. budget → workflow_router 硬编码条件路由（无 LLM）
+4. finalize → END
 """
 
 from langgraph.graph import StateGraph, START, END
 from app.graph.state import TripState
 from app.graph.nodes import (
     initialize_node,
-    supervisor_node,
     data_collection_node,
     planner_node,
     budget_node,
-    poi_node,
-    weather_node,
-    hotel_node,
     finalize_node,
 )
-from app.graph.routing import supervisor_router
+from app.graph.routing import workflow_router
 
 
 def build_trip_workflow() -> StateGraph:
-    """
-    构建多 Agent 协作旅行规划工作流（P1 优化版）
-
-    流程：
-    START → initialize → supervisor → (条件路由)
-      ├─ "collect"  → data_collection_node → supervisor
-      ├─ "plan"     → planner_node → budget_node → supervisor
-      ├─ "poi"      → poi_node → supervisor (错误重试)
-      ├─ "weather"  → weather_node → supervisor (错误重试)
-      ├─ "hotel"    → hotel_node → supervisor (错误重试)
-      └─ "finalize" → finalize_node → END
-
-    关键变更：
-    - data_collection_node 内部并行执行 POI/Weather/Hotel，完成后统一返回
-    - planner_node → budget_node 直接链式调用
-    """
-    # 1. 创建 StateGraph
+    """构建 Planner-Centric 旅行规划工作流"""
     graph = StateGraph(TripState)
 
-    # 2. 注册所有节点
+    # 注册节点
     graph.add_node("initialize_node", initialize_node)
-    graph.add_node("supervisor_node", supervisor_node)
     graph.add_node("data_collection_node", data_collection_node)
     graph.add_node("planner_node", planner_node)
     graph.add_node("budget_node", budget_node)
-    graph.add_node("poi_node", poi_node)
-    graph.add_node("weather_node", weather_node)
-    graph.add_node("hotel_node", hotel_node)
     graph.add_node("finalize_node", finalize_node)
 
-    # 3. 连接边
-
-    # 3a. 入口
+    # 确定性管道
     graph.add_edge(START, "initialize_node")
-    graph.add_edge("initialize_node", "supervisor_node")
+    graph.add_edge("initialize_node", "data_collection_node")
+    graph.add_edge("data_collection_node", "planner_node")
+    graph.add_edge("planner_node", "budget_node")
 
-    # 3b. Supervisor 条件路由
+    # 唯一条件边：预算超限回路
     graph.add_conditional_edges(
-        "supervisor_node",
-        supervisor_router,
+        "budget_node",
+        workflow_router,
         {
-            "data_collection_node": "data_collection_node",
             "planner_node": "planner_node",
-            "budget_node": "budget_node",
-            "poi_node": "poi_node",
-            "weather_node": "weather_node",
-            "hotel_node": "hotel_node",
             "finalize_node": "finalize_node",
-            "supervisor_node": "supervisor_node",
         },
     )
 
-    # 3c. 数据收集完成后 → 返回 Supervisor
-    graph.add_edge("data_collection_node", "supervisor_node")
-
-    # 3d. 规划链：planner → budget（中间不回 Supervisor）
-    graph.add_edge("planner_node", "budget_node")
-    # budget 完成后 → 返回 Supervisor 做最终决策
-    graph.add_edge("budget_node", "supervisor_node")
-
-    # 3e. 单 Agent 重试节点完成后 → 返回 Supervisor
-    graph.add_edge("poi_node", "supervisor_node")
-    graph.add_edge("weather_node", "supervisor_node")
-    graph.add_edge("hotel_node", "supervisor_node")
-
-    # 3f. finalize → END
+    # 终止
     graph.add_edge("finalize_node", END)
 
-    # 4. 编译
-    app = graph.compile()
-
-    return app
+    return graph.compile()
 
 
 # 模块级单例
@@ -138,11 +91,8 @@ def get_workflow() -> StateGraph:
     global _workflow
     if _workflow is None:
         _workflow = build_trip_workflow()
-        print("✅ LangGraph 多 Agent 工作流构建完成 (P1 优化版)")
-        print(f"   节点: initialize → supervisor → data_collection|planner→budget|finalize")
-        print(f"   路由: supervisor_router (3 阶段决策, 错误重试/降级)")
-        print(f"   循环上限: max_iterations=15")
-        print(f"   数据收集: POI+Weather+Hotel 并行 (ThreadPoolExecutor)")
-        print(f"   规划链: planner → budget (无中间 Supervisor)")
-        print(f"   Supervisor 调用次数: 3 次 (vs 原 6 次)")
+        print("✅ LangGraph Planner-Centric 工作流构建完成")
+        print(f"   管道: init → data_collection(POI+Weather+Hotel+并行) → planner → budget → finalize")
+        print(f"   条件回路: budget → workflow_router → planner(修正) ─→ budget → finalize")
+        print(f"   修正上限: revision_round < 3, 死循环保护: iteration >= max_iterations")
     return _workflow

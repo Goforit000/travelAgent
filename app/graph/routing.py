@@ -1,68 +1,45 @@
 """
-LangGraph 条件路由 — 根据 Supervisor 的决策和错误状态决定下一个节点
+工作流条件路由 — 硬编码确定性规则（无 LLM）
 
-P1 优化：Supervisor 减频
-- Supervisor 只做阶段级路由（collect / plan / finalize），不再每个 Agent 后都调用
-- "collect" → data_collection_node（内部并行运行 POI + Weather + Hotel）
-- "plan"   → planner_node → budget_node（链式，中间不回 Supervisor）
-- "finalize" → finalize_node → END
+Planner-Centric Pipeline 的唯一条件分支：
+  budget_node 完成后 → workflow_router() → planner_node | finalize_node
 
-错误重试/降级逻辑保留在路由层。
+规则：
+1. 预算超限 + revision_round < 3 → 回退到 planner_node 修正
+2. iteration_count >= max_iterations → 强制 finalize_node（防死循环）
+3. 其他情况 → finalize_node
 """
 
 from app.graph.state import TripState
 
-# next_agent / last_agent 值 → LangGraph 节点名称 映射表
-AGENT_TO_NODE: dict[str, str] = {
-    "poi": "poi_node",
-    "weather": "weather_node",
-    "hotel": "hotel_node",
-    "planner": "planner_node",
-    "budget": "budget_node",
-    "collect": "data_collection_node",
-    "finalize": "finalize_node",
-}
+MAX_REVISION_ROUNDS = 3
 
-
-def supervisor_router(state: TripState) -> str:
+def workflow_router(state: TripState) -> str:
     """
-    Supervisor 的条件路由函数
+    预算节点后的硬编码条件路由
 
-    被 LangGraph 的 add_conditional_edges 调用。
-
-    返回必须是已注册的节点名称字符串。
+    判断逻辑（按优先级）：
+    1. 全局死循环保护
+    2. 预算超限 + 有修正配额 → 回退 planner
+    3. 否则 → 结束到 finalize
     """
     iteration_count = state.get("iteration_count", 0)
     max_iterations = state.get("max_iterations", 10)
-    error = state.get("error", "")
-    retry_count = state.get("retry_count", 0)
-    last_agent = state.get("last_agent", "")
-    next_agent = state.get("next_agent", "")
+    revision_round = state.get("revision_round", 0)
 
-    # ——— 分支 0：迭代上限保护（最高优先级）———
+    # Guard: 死循环保护
     if iteration_count >= max_iterations:
-        print(f"  [Router] 迭代次数 {iteration_count} >= {max_iterations}，强制 → finalize_node")
+        print(f"  [Router] 迭代 {iteration_count} >= {max_iterations}，强制 → finalize_node")
         return "finalize_node"
 
-    # ——— 分支 1：错误重试 ———
-    if error and retry_count < 3 and last_agent:
-        retry_node = AGENT_TO_NODE.get(last_agent)
-        if retry_node:
-            new_count = retry_count + 1
-            print(f"  [Router] 错误重试: {last_agent} → {retry_node} (第 {new_count} 次)")
-            return retry_node
+    # Guard: 预算超限 + 未达修正上限
+    agent_outputs = state.get("agent_outputs", {})
+    budget_value = agent_outputs.get("budget_agent", "")
+    overshoot = isinstance(budget_value, str) and budget_value.startswith("OVERSHOOT|")
 
-    # ——— 分支 2：错误降级 ———
-    if error and retry_count >= 3:
-        print(f"  [Router] 错误降级: {last_agent} 已达最大重试次数，返回 Supervisor 重新决策")
-        return "supervisor_node"
+    if overshoot and revision_round < MAX_REVISION_ROUNDS:
+        print(f"  [Router] 预算超限! revision_round={revision_round} < {MAX_REVISION_ROUNDS} → planner_node")
+        return "planner_node"
 
-    # ——— 分支 3：正常路由 ———
-    target_node = AGENT_TO_NODE.get(next_agent)
-
-    if target_node is None:
-        print(f"  [Router] next_agent='{next_agent}' 无效，返回 Supervisor 重新决策")
-        return "supervisor_node"
-
-    print(f"  [Router] next_agent='{next_agent}' → {target_node}")
-    return target_node
+    print(f"  [Router] → finalize_node")
+    return "finalize_node"

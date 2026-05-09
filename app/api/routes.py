@@ -24,7 +24,6 @@ router = APIRouter(prefix="/api", tags=["旅行规划"])
 # 节点名称 → 用户可见的 Agent 名称 映射
 NODE_TO_AGENT_NAME: dict[str, str] = {
     "initialize_node": "初始化",
-    "supervisor_node": "调度中心",
     "data_collection_node": "数据收集 (景点+天气+酒店)",
     "poi_node": "景点搜索",
     "weather_node": "天气查询",
@@ -34,7 +33,7 @@ NODE_TO_AGENT_NAME: dict[str, str] = {
     "finalize_node": "完成处理",
 }
 
-# 节点 → 完成后对应的进度百分比（P1 优化：3 阶段）
+# 节点 → 完成后对应的进度百分比
 NODE_PROGRESS: dict[str, int] = {
     "initialize_node": 5,
     "data_collection_node": 40,
@@ -181,8 +180,6 @@ async def plan_trip(request: TripRequest):
         initial_state = {
             "request": request,
             "messages": [],
-            "next_agent": "",
-            "last_agent": "",
             "retry_count": 0,
             "phase": "collect",
             "max_iterations": 10,
@@ -244,8 +241,6 @@ async def plan_trip_stream(request: TripRequest):
     initial_state = {
         "request": request,
         "messages": [],
-        "next_agent": "",
-        "last_agent": "",
         "retry_count": 0,
         "phase": "collect",
         "max_iterations": 10,

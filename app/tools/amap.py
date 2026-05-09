@@ -88,17 +88,16 @@ def search_pois(
         print(f"❌ 高德POI搜索异常: {e}")
         return []
 
-
 def get_weather(city: str) -> list[dict]:
     """
     查询城市天气预报
 
     Args:
-        city: 城市名或城市编码，如"北京"、"110000"
+        city: 城市名或城市编码，如 "北京"
 
     Returns:
-        天气预报列表，每条包含 date/day_weather/night_weather/temps 等
-        调用失败返回空列表
+        天气预报列表（最多4天），每条包含 date/day_weather/night_weather/temps 等
+        如果失败返回空列表
     """
     try:
         resp = httpx.get(
@@ -106,7 +105,7 @@ def get_weather(city: str) -> list[dict]:
             params={
                 "key": settings.amap_api_key,
                 "city": city,
-                "extensions": "all",
+                "extensions": "all",  # "all" 返回预报，"base" 只返回实况
                 "output": "json",
             },
             timeout=10,
@@ -118,6 +117,7 @@ def get_weather(city: str) -> list[dict]:
             print(f"⚠️ 高德天气查询失败: {data.get('info', 'unknown error')}")
             return []
 
+        # 从 forecasts 里提取每日天气
         forecasts = data.get("forecasts", [])
         if not forecasts:
             return []
@@ -140,7 +140,6 @@ def get_weather(city: str) -> list[dict]:
     except Exception as e:
         print(f"❌ 高德天气查询异常: {e}")
         return []
-
 
 # ============================================================
 # @tool 装饰的 Agent 工具（供 LLM Tool Calling 使用）

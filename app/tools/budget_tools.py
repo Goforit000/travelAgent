@@ -15,18 +15,11 @@ from langchain_core.tools import tool
 @tool
 def calculate_budget_tool(
     trip_plan_json: str,
-    hotel_cost_per_night: int = 0,
+    hotel_cost_per_night: int = 150,
     transport_cost_per_day: int = 50,
 ) -> str:
     """
     精确计算旅行计划的总预算。
-
-    解析行程计划 JSON，逐项汇总以下费用：
-    1. 景点门票费用（所有天、所有景点的 ticket_price 之和）
-    2. 酒店住宿费用（hotel.estimated_cost × 住宿天数，或使用 hotel_cost_per_night 估算）
-    3. 餐饮费用（所有天、所有餐的 estimated_cost 之和）
-    4. 交通费用（transport_cost_per_day × 旅行天数）
-
     当 Budget Agent 需要计算或复核行程预算时调用此工具。
 
     Args:
@@ -34,7 +27,7 @@ def calculate_budget_tool(
                         可以是纯 JSON 或包含 ```json 代码块的文本。
                         必须包含 days 数组，每个 day 包含 attractions、meals、hotel 字段。
         hotel_cost_per_night: 如果行程中没有指定酒店费用，使用此参数作为每晚酒店估算费用。
-                              默认为 0（不额外估算）。
+                              默认为 150。
         transport_cost_per_day: 每日交通费用估算，默认为 50 元/天。
 
     Returns:
@@ -192,7 +185,18 @@ def calculate_budget_tool(
             "message": f"行程中未包含酒店费用，使用估算值 {hotel_cost_per_night}元/晚 × {travel_days}晚",
         })
 
-    total_transportation = transport_cost_per_day * travel_days
+    # 优先用行程 JSON 中的交通预算，缺失时才用参数估算
+    plan_budget = plan.get("budget", {}) if isinstance(plan.get("budget"), dict) else {}
+    plan_transport = plan_budget.get("total_transportation", 0)
+    if isinstance(plan_transport, (int, float)) and plan_transport > 0:
+        total_transportation = int(plan_transport)
+    else:
+        total_transportation = transport_cost_per_day * travel_days
+        warnings.append({
+            "type": "transport_estimated",
+            "message": f"行程中未包含交通费用，使用估算值 {transport_cost_per_day}元/天 × {travel_days}天",
+        })
+
     total = total_attractions + total_hotels + total_meals + total_transportation
 
     # 异常检测
@@ -207,7 +211,7 @@ def calculate_budget_tool(
         if avg_meal_per_day > 500:
             warnings.append({"type": "high_meal_budget", "message": f"日均餐饮 {avg_meal_per_day:.0f} 元，可能偏高"})
 
-    return json.dumps({
+    result = json.dumps({
         "total_attractions": total_attractions,
         "total_hotels": total_hotels,
         "total_meals": total_meals,
@@ -216,6 +220,11 @@ def calculate_budget_tool(
         "breakdown": daily_breakdown,
         "warnings": warnings,
     }, ensure_ascii=False, indent=2)
+    print(f"{'=' * 60}\n")
+    print(
+        f"calculate_budget_tool的预算建议：\n{result}"
+    )
+    return result
 
 
 @tool

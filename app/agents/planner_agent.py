@@ -50,7 +50,7 @@ PLANNER_SYSTEM_PROMPT = """你是一个专业的旅行规划师。
         "address": "酒店地址",
         "location": {"longitude": 116.397, "latitude": 39.916},
         "price_range": "价格范围",
-        "rating": "评分",
+        "rating": "评分"（number类型）,
         "distance": "距景点距离",
         "type": "酒店类型",
         "estimated_cost": 300
@@ -179,6 +179,7 @@ class PlannerAgent(BaseAgent):
         print(f"{'=' * 50}\n")
 
         agent_msg = f"行程修正完成 ({len(raw_plan_text)} 字符)" if is_revision else f"行程生成完成 ({len(raw_plan_text)} 字符)"
+        print(f"行程信息：{raw_plan_text}")
 
         return {
             "raw_plan_text": raw_plan_text,
@@ -238,7 +239,7 @@ class PlannerAgent(BaseAgent):
                     target = payload.get("target_budget", 0)
                     overshoot = payload.get("overshoot_amount", 0)
                     suggestions = payload.get("savings_suggestions", [])
-
+                    print(f"budget的建议：{suggestions}")
                     budget_info_text = f"\n## 预算约束（第 {revision_round + 1} 次修正）\n"
                     budget_info_text += f"- 目标总预算上限: {target} 元（必须严格遵守）\n"
                     budget_info_text += f"- 当前超支金额: {overshoot} 元\n"
@@ -278,7 +279,7 @@ def _format_attractions(attractions: list[dict], travel_days: int, hotels: list[
     # 为每个 cluster 挂载最近的酒店
     if hotels:
         for cluster in clusters:
-            cluster["hotels"] = _find_nearest_hotels(cluster, hotels, top_n=2)
+            cluster["hotels"] = _find_nearest_hotels(cluster, hotels, top_n=3)
         hotel_count = sum(len(c.get("hotels", [])) for c in clusters)
         print(f"  [planner_agent] 酒店挂载: {len(hotels)} 个酒店 → {hotel_count} 个分配")
 
@@ -342,7 +343,7 @@ def _format_attractions(attractions: list[dict], travel_days: int, hotels: list[
     return "\n".join(lines)
 
 
-def _find_nearest_hotels(cluster: dict, hotels: list[dict], top_n: int = 2) -> list[dict]:
+def _find_nearest_hotels(cluster: dict, hotels: list[dict], top_n: int = 3) -> list[dict]:
     """找到离 cluster 中心最近的 top_n 个酒店"""
     import math
 
@@ -483,7 +484,7 @@ def _format_hotels(hotels: list[dict]) -> str:
         return "暂无酒店信息，请根据常识推荐合适的酒店。"
 
     # 按空间聚类分组，与景点区域格式一致（LLM 可据此为每天选对应区域的酒店）
-    clusters = _greedy_cluster(hotels, target_clusters=min(len(hotels), 3), min_threshold_km=2.0, max_threshold_km=20.0)
+    clusters = _greedy_cluster(hotels, target_clusters=min(len(hotels), 3), min_threshold_km=2.0, max_threshold_km=5.0)
     print(f"  [planner_agent] 酒店聚类: {len(hotels)} 个酒店 → {len(clusters)} 个区域")
 
     lines: list[str] = []
