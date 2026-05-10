@@ -125,6 +125,19 @@ export interface TripPlanResponse {
   success: boolean
   message: string
   data?: TripPlan
+  trip_id?: string
+}
+
+/** 历史计划列表项 */
+export interface HistoryItem {
+  id: string
+  city: string
+  start_date: string
+  end_date: string
+  travel_days: number
+  preferences: string[]
+  budget_total: number | null
+  created_at: string
 }
 
 // ============================================================

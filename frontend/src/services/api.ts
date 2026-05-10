@@ -227,6 +227,39 @@ function _dispatchEvent(
 }
 
 // ============================================================
+// 历史计划
+// ============================================================
+
+export async function fetchTripHistory(limit: number = 20): Promise<any[]> {
+  try {
+    const response = await apiClient.get('/api/history', { params: { limit } })
+    return response.data?.data || []
+  } catch (error: any) {
+    console.error('获取历史记录失败:', error)
+    return []
+  }
+}
+
+export async function fetchTripDetail(tripId: string): Promise<any> {
+  try {
+    const response = await apiClient.get(`/api/history/${tripId}`)
+    return response.data?.data || null
+  } catch (error: any) {
+    console.error('获取计划详情失败:', error)
+    throw new Error(error.response?.data?.detail || error.message || '获取失败')
+  }
+}
+
+export async function deleteTrip(tripId: string): Promise<void> {
+  try {
+    await apiClient.delete(`/api/history/${tripId}`)
+  } catch (error: any) {
+    console.error('删除计划失败:', error)
+    throw new Error(error.response?.data?.detail || error.message || '删除失败')
+  }
+}
+
+// ============================================================
 // 健康检查
 // ============================================================
 

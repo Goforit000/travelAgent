@@ -316,14 +316,16 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { DownOutlined } from '@ant-design/icons-vue'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
+import { fetchTripDetail } from '@/services/api'
 import type { TripPlan } from '@/types'
 
 const router = useRouter()
+const route = useRoute()
 const tripPlan = ref<TripPlan | null>(null)
 const editMode = ref(false)
 const originalPlan = ref<TripPlan | null>(null)
@@ -333,15 +335,32 @@ const activeDays = ref<number[]>([0]) // 默认展开第一天
 let map: any = null
 
 onMounted(async () => {
-  const data = sessionStorage.getItem('tripPlan')
-  if (data) {
-    tripPlan.value = JSON.parse(data)
-    console.log(tripPlan.value)
-    // 加载景点图片
-    await loadAttractionPhotos()
-    // 等待DOM渲染完成后初始化地图
+  const routeTripId = route.query.id as string
+  if (routeTripId) {
+    // 从 API 加载历史计划
+    try {
+      tripPlan.value = await fetchTripDetail(routeTripId)
+      if (!tripPlan.value) {
+        message.error('计划不存在')
+        router.push('/')
+        return
+      }
+    } catch (e: any) {
+      message.error(e.message || '加载失败')
+      router.push('/')
+      return
+    }
     await nextTick()
     initMap()
+  } else {
+    // 从 sessionStorage 加载（新生成的计划）
+    const data = sessionStorage.getItem('tripPlan')
+    if (data) {
+      tripPlan.value = JSON.parse(data)
+      await loadAttractionPhotos()
+      await nextTick()
+      initMap()
+    }
   }
 })
 

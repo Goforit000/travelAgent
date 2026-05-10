@@ -101,7 +101,6 @@ class Budget(BaseModel):
 class BudgetDetail(BaseModel):
     """
     预算明细 — Budget Agent 输出的详细分析
-
     比 Budget 更细粒度，包含分类占比、优化建议等。
     """
     total_attractions: int = Field(default=0, description="门票总费用")
@@ -142,7 +141,6 @@ class DayPlan(BaseModel):
 class TripPlan(BaseModel):
     """
     完整旅行计划 — 最终返回给前端的核心数据
-
     Multi-Agent 重构说明：
     - city/start_date/end_date/days 保持必填（核心结构）
     - weather_info/budget 为可选，支持渐进式填充

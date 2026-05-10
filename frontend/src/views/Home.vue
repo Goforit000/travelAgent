@@ -6,246 +6,289 @@
       <div class="circle circle-2"></div>
       <div class="circle circle-3"></div>
     </div>
-
     <!-- 页面标题 -->
     <div class="page-header">
       <div class="icon-wrapper">
         <span class="icon">✈️</span>
+        <h1 class="page-title">智能旅行助手</h1>
+        <p class="page-subtitle">基于多agent的个性化旅行规划，让每一次出行都完美无忧</p>
       </div>
-      <h1 class="page-title">智能旅行助手</h1>
-      <p class="page-subtitle">基于多agent的个性化旅行规划，让每一次出行都完美无忧</p>
     </div>
 
-    <a-card class="form-card" :bordered="false">
-      <a-form
-        :model="formData"
-        layout="vertical"
-        @finish="handleSubmit"
-      >
-        <!-- 第一步：目的地和日期 -->
-        <div class="form-section">
-          <div class="section-header">
-            <span class="section-icon">📍</span>
-            <span class="section-title">目的地与日期</span>
-          </div>
-
-          <a-row :gutter="24">
-            <a-col :span="8">
-              <a-form-item name="city" :rules="[{ required: true, message: '请输入目的地城市' }]">
-                <template #label>
-                  <span class="form-label">目的地城市</span>
-                </template>
-                <a-input
-                  v-model:value="formData.city"
-                  placeholder="例如: 北京"
-                  size="large"
-                  class="custom-input"
-                >
-                  <template #prefix>
-                    <span style="color: #1890ff;">🏙️</span>
-                  </template>
-                </a-input>
-              </a-form-item>
-            </a-col>
-            <a-col :span="6">
-              <a-form-item name="start_date" :rules="[{ required: true, message: '请选择开始日期' }]">
-                <template #label>
-                  <span class="form-label">开始日期</span>
-                </template>
-                <a-date-picker
-                  v-model:value="formData.start_date"
-                  style="width: 100%"
-                  size="large"
-                  class="custom-input"
-                  placeholder="选择日期"
-                />
-              </a-form-item>
-            </a-col>
-            <a-col :span="6">
-              <a-form-item name="end_date" :rules="[{ required: true, message: '请选择结束日期' }]">
-                <template #label>
-                  <span class="form-label">结束日期</span>
-                </template>
-                <a-date-picker
-                  v-model:value="formData.end_date"
-                  style="width: 100%"
-                  size="large"
-                  class="custom-input"
-                  placeholder="选择日期"
-                />
-              </a-form-item>
-            </a-col>
-            <a-col :span="4">
-              <a-form-item>
-                <template #label>
-                  <span class="form-label">旅行天数</span>
-                </template>
-                <div class="days-display-compact">
-                  <span class="days-value">{{ formData.travel_days }}</span>
-                  <span class="days-unit">天</span>
-                </div>
-              </a-form-item>
-            </a-col>
-          </a-row>
+    <!-- 主布局：左侧历史 + 右侧表单 -->
+    <div class="home-layout">
+      <!-- 左侧历史侧边栏 -->
+      <div class="history-sidebar">
+        <div class="history-header">
+          <span>📋 历史计划</span>
+          <a-button size="small" type="text" @click="loadHistory" :loading="historyLoading">🔄</a-button>
         </div>
-
-        <!-- 第二步：偏好设置 -->
-        <div class="form-section">
-          <div class="section-header">
-            <span class="section-icon">⚙️</span>
-            <span class="section-title">偏好设置</span>
+        <div class="history-list">
+          <a-spin v-if="historyLoading" size="small" style="display:block;text-align:center;padding:20px;" />
+          <div v-else-if="historyList.length === 0" class="history-empty">
+            暂无历史计划
           </div>
-
-          <!-- 第一行：交通方式 + 住宿偏好 + 预算 -->
-          <a-row :gutter="24">
-            <a-col :span="8">
-              <a-form-item name="transportation">
-                <template #label>
-                  <span class="form-label">交通方式</span>
-                </template>
-                <a-select v-model:value="formData.transportation" size="large" class="custom-select">
-                  <a-select-option value="公共交通">🚇 公共交通</a-select-option>
-                  <a-select-option value="自驾">🚗 自驾</a-select-option>
-                  <a-select-option value="步行">🚶 步行</a-select-option>
-                  <a-select-option value="混合">🔀 混合</a-select-option>
-                </a-select>
-              </a-form-item>
-            </a-col>
-            <a-col :span="8">
-              <a-form-item name="accommodation">
-                <template #label>
-                  <span class="form-label">住宿偏好</span>
-                </template>
-                <a-select v-model:value="formData.accommodation" size="large" class="custom-select">
-                  <a-select-option value="经济型酒店">💰 经济型酒店</a-select-option>
-                  <a-select-option value="舒适型酒店">🏨 舒适型酒店</a-select-option>
-                  <a-select-option value="豪华酒店">⭐ 豪华酒店</a-select-option>
-                  <a-select-option value="民宿">🏡 民宿</a-select-option>
-                </a-select>
-              </a-form-item>
-            </a-col>
-            <a-col :span="8">
-              <a-form-item name="target_budget">
-                <template #label>
-                  <span class="form-label">总预算上限</span>
-                </template>
-                <div class="budget-slider-wrapper">
-                  <a-slider
-                    v-model:value="formData.target_budget"
-                    :min="0"
-                    :max="20000"
-                    :step="100"
-                    :marks="budgetMarks"
-                    class="budget-slider"
-                  />
-                  <div class="budget-display">
-                    <template v-if="formData.target_budget <= 19900">
-                      <span class="budget-value">¥{{ formData.target_budget.toLocaleString() }}</span>
-                      <span class="budget-hint"></span>
-                    </template>
-                    <template v-else>
-                      <span class="budget-value">不限</span>
-                    </template>
-                  </div>
-                </div>
-              </a-form-item>
-            </a-col>
-          </a-row>
-
-          <!-- 第二行：旅行偏好（独立一行，左对齐） -->
-          <a-row :gutter="24">
-            <a-col :span="24">
-              <a-form-item name="preferences">
-                <template #label>
-                  <span class="form-label">旅行偏好</span>
-                </template>
-                <div class="preference-tags">
-                  <a-checkbox-group v-model:value="formData.preferences" class="custom-checkbox-group">
-                    <a-checkbox value="历史文化" class="preference-tag">🏛️ 历史文化</a-checkbox>
-                    <a-checkbox value="自然风光" class="preference-tag">🏞️ 自然风光</a-checkbox>
-                    <a-checkbox value="美食" class="preference-tag">🍜 美食</a-checkbox>
-                    <a-checkbox value="购物" class="preference-tag">🛍️ 购物</a-checkbox>
-                    <a-checkbox value="艺术" class="preference-tag">🎨 艺术</a-checkbox>
-                    <a-checkbox value="休闲" class="preference-tag">☕ 休闲</a-checkbox>
-                  </a-checkbox-group>
-                </div>
-              </a-form-item>
-            </a-col>
-          </a-row>
-        </div>
-
-        <!-- 第三步：额外要求 -->
-        <div class="form-section">
-          <div class="section-header">
-            <span class="section-icon">💬</span>
-            <span class="section-title">额外要求</span>
-          </div>
-
-          <a-form-item name="free_text_input">
-            <a-textarea
-              v-model:value="formData.free_text_input"
-              placeholder="请输入您的额外要求，例如:想去看升旗、需要无障碍设施、对海鲜过敏等..."
-              :rows="3"
-              size="large"
-              class="custom-textarea"
-            />
-          </a-form-item>
-        </div>
-
-        <!-- 提交按钮 -->
-        <a-form-item>
-          <a-button
-            type="primary"
-            html-type="submit"
-            :loading="loading"
-            size="large"
-            block
-            class="submit-button"
+          <div
+            v-for="item in historyList"
+            :key="item.id"
+            class="history-item"
+            @click="openHistory(item.id)"
           >
-            <template v-if="!loading">
-              <span class="button-icon">🚀</span>
-              <span>开始规划我的旅行</span>
-            </template>
-            <template v-else>
-              <span>{{ loadingButtonText }}</span>
-            </template>
-          </a-button>
-        </a-form-item>
-
-        <!-- 实时进度条（由 SSE 事件驱动） -->
-        <a-form-item v-if="loading">
-          <div class="loading-container">
-            <a-progress
-              :percent="progressPct"
-              :status="progressPct === 100 ? 'success' : 'active'"
-              :stroke-color="{
-                '0%': '#667eea',
-                '100%': '#764ba2',
-              }"
-              :stroke-width="10"
-            />
-            <div class="loading-detail">
-              <p class="loading-status">
-                <span class="loading-icon">{{ statusIcon }}</span>
-                {{ statusMessage }}
-              </p>
-              <p class="loading-agent" v-if="currentAgent">
-                当前阶段：{{ currentAgent }}
-              </p>
+            <div class="history-item-top">
+              <span class="history-city">🏙️ {{ item.city }}</span>
+              <a-popconfirm
+                title="确定删除该计划？"
+                ok-text="删除"
+                cancel-text="取消"
+                @confirm.stop="handleDeleteHistory(item.id)"
+                @click.stop
+              >
+                <a-button size="small" type="text" danger class="history-delete">🗑️</a-button>
+              </a-popconfirm>
+            </div>
+            <div class="history-item-info">
+              <span>{{ item.start_date }} ~ {{ item.end_date }}</span>
+              <span>{{ item.travel_days }}天</span>
+              <span v-if="item.budget_total">¥{{ item.budget_total.toLocaleString() }}</span>
             </div>
           </div>
-        </a-form-item>
-      </a-form>
-    </a-card>
+        </div>
+      </div>
+
+      <!-- 右侧表单区 -->
+      <div class="main-area">
+        <a-card class="form-card" :bordered="false">
+          <a-form
+            :model="formData"
+            layout="vertical"
+            @finish="handleSubmit"
+          >
+            <!-- 第一步：目的地和日期 -->
+            <div class="form-section">
+              <div class="section-header">
+                <span class="section-icon">📍</span>
+                <span class="section-title">目的地与日期</span>
+              </div>
+
+              <a-row :gutter="24">
+                <a-col :span="8">
+                  <a-form-item name="city" :rules="[{ required: true, message: '请输入目的地城市' }]">
+                    <template #label>
+                      <span class="form-label">目的地城市</span>
+                    </template>
+                    <a-input
+                      v-model:value="formData.city"
+                      placeholder="例如: 北京"
+                      size="large"
+                      class="custom-input"
+                    >
+                      <template #prefix>
+                        <span style="color: #1890ff;">🏙️</span>
+                      </template>
+                    </a-input>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="6">
+                  <a-form-item name="start_date" :rules="[{ required: true, message: '请选择开始日期' }]">
+                    <template #label>
+                      <span class="form-label">开始日期</span>
+                    </template>
+                    <a-date-picker
+                      v-model:value="formData.start_date"
+                      style="width: 100%"
+                      size="large"
+                      class="custom-input"
+                      placeholder="选择日期"
+                    />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="6">
+                  <a-form-item name="end_date" :rules="[{ required: true, message: '请选择结束日期' }]">
+                    <template #label>
+                      <span class="form-label">结束日期</span>
+                    </template>
+                    <a-date-picker
+                      v-model:value="formData.end_date"
+                      style="width: 100%"
+                      size="large"
+                      class="custom-input"
+                      placeholder="选择日期"
+                    />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="4">
+                  <a-form-item>
+                    <template #label>
+                      <span class="form-label">旅行天数</span>
+                    </template>
+                    <div class="days-display-compact">
+                      <span class="days-value">{{ formData.travel_days }}</span>
+                      <span class="days-unit">天</span>
+                    </div>
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </div>
+
+            <!-- 第二步：偏好设置 -->
+            <div class="form-section">
+              <div class="section-header">
+                <span class="section-icon">⚙️</span>
+                <span class="section-title">偏好设置</span>
+              </div>
+
+              <!-- 第一行：交通方式 + 住宿偏好 + 预算 -->
+              <a-row :gutter="24">
+                <a-col :span="8">
+                  <a-form-item name="transportation">
+                    <template #label>
+                      <span class="form-label">交通方式</span>
+                    </template>
+                    <a-select v-model:value="formData.transportation" size="large" class="custom-select">
+                      <a-select-option value="公共交通">🚇 公共交通</a-select-option>
+                      <a-select-option value="自驾">🚗 自驾</a-select-option>
+                      <a-select-option value="步行">🚶 步行</a-select-option>
+                      <a-select-option value="混合">🔀 混合</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="8">
+                  <a-form-item name="accommodation">
+                    <template #label>
+                      <span class="form-label">住宿偏好</span>
+                    </template>
+                    <a-select v-model:value="formData.accommodation" size="large" class="custom-select">
+                      <a-select-option value="经济型酒店">💰 经济型酒店</a-select-option>
+                      <a-select-option value="舒适型酒店">🏨 舒适型酒店</a-select-option>
+                      <a-select-option value="豪华酒店">⭐ 豪华酒店</a-select-option>
+                      <a-select-option value="民宿">🏡 民宿</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="8">
+                  <a-form-item name="target_budget">
+                    <template #label>
+                      <span class="form-label">总预算上限</span>
+                    </template>
+                    <div class="budget-slider-wrapper">
+                      <a-slider
+                        v-model:value="formData.target_budget"
+                        :min="0"
+                        :max="20000"
+                        :step="100"
+                        :marks="budgetMarks"
+                        class="budget-slider"
+                      />
+                      <div class="budget-display">
+                        <template v-if="formData.target_budget <= 19900">
+                          <span class="budget-value">¥{{ formData.target_budget.toLocaleString() }}</span>
+                          <span class="budget-hint"></span>
+                        </template>
+                        <template v-else>
+                          <span class="budget-value">不限</span>
+                        </template>
+                      </div>
+                    </div>
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
+              <!-- 第二行：旅行偏好（独立一行，左对齐） -->
+              <a-row :gutter="24">
+                <a-col :span="24">
+                  <a-form-item name="preferences">
+                    <template #label>
+                      <span class="form-label">旅行偏好</span>
+                    </template>
+                    <div class="preference-tags">
+                      <a-checkbox-group v-model:value="formData.preferences" class="custom-checkbox-group">
+                        <a-checkbox value="历史文化" class="preference-tag">🏛️ 历史文化</a-checkbox>
+                        <a-checkbox value="自然风光" class="preference-tag">🏞️ 自然风光</a-checkbox>
+                        <a-checkbox value="美食" class="preference-tag">🍜 美食</a-checkbox>
+                        <a-checkbox value="购物" class="preference-tag">🛍️ 购物</a-checkbox>
+                        <a-checkbox value="艺术" class="preference-tag">🎨 艺术</a-checkbox>
+                        <a-checkbox value="休闲" class="preference-tag">☕ 休闲</a-checkbox>
+                      </a-checkbox-group>
+                    </div>
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </div>
+
+            <!-- 第三步：额外要求 -->
+            <div class="form-section">
+              <div class="section-header">
+                <span class="section-icon">💬</span>
+                <span class="section-title">额外要求</span>
+              </div>
+
+              <a-form-item name="free_text_input">
+                <a-textarea
+                  v-model:value="formData.free_text_input"
+                  placeholder="请输入您的额外要求，例如:想去看升旗、需要无障碍设施、对海鲜过敏等..."
+                  :rows="3"
+                  size="large"
+                  class="custom-textarea"
+                />
+              </a-form-item>
+            </div>
+
+            <!-- 提交按钮 -->
+            <a-form-item>
+              <a-button
+                type="primary"
+                html-type="submit"
+                :loading="loading"
+                size="large"
+                block
+                class="submit-button"
+              >
+                <template v-if="!loading">
+                  <span class="button-icon">🚀</span>
+                  <span>开始规划我的旅行</span>
+                </template>
+                <template v-else>
+                  <span>{{ loadingButtonText }}</span>
+                </template>
+              </a-button>
+            </a-form-item>
+
+            <!-- 实时进度条（由 SSE 事件驱动） -->
+            <a-form-item v-if="loading">
+              <div class="loading-container">
+                <a-progress
+                  :percent="progressPct"
+                  :status="progressPct === 100 ? 'success' : 'active'"
+                  :stroke-color="{
+                    '0%': '#667eea',
+                    '100%': '#764ba2',
+                  }"
+                  :stroke-width="10"
+                />
+                <div class="loading-detail">
+                  <p class="loading-status">
+                    <span class="loading-icon">{{ statusIcon }}</span>
+                    {{ statusMessage }}
+                  </p>
+                  <p class="loading-agent" v-if="currentAgent">
+                    当前阶段：{{ currentAgent }}
+                  </p>
+                </div>
+              </div>
+            </a-form-item>
+          </a-form>
+        </a-card>
+      </div><!-- .main-area -->
+    </div><!-- .home-layout -->
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { generateTripStream } from '@/services/api'
-import type { TripFormData } from '@/types'
+import { generateTripStream, fetchTripHistory, deleteTrip } from '@/services/api'
+import type { TripFormData, HistoryItem } from '@/types'
 import type { Dayjs } from 'dayjs'
 
 const router = useRouter()
@@ -255,6 +298,10 @@ const statusMessage = ref('')
 const statusIcon = ref('🔍')
 const currentAgent = ref('')
 const loadingButtonText = ref('正在生成中...')
+
+// 历史计划
+const historyList = ref<HistoryItem[]>([])
+const historyLoading = ref(false)
 
 const formData = reactive<Omit<TripFormData, 'start_date' | 'end_date'> & { start_date: Dayjs | null; end_date: Dayjs | null }>({
   city: '',
@@ -288,6 +335,36 @@ const agentIcons: Record<string, string> = {
   '预算计算': '💰',
   '完成处理': '🏁',
 }
+
+// 加载历史计划
+const loadHistory = async () => {
+  historyLoading.value = true
+  try {
+    historyList.value = await fetchTripHistory(20)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+// 打开历史计划
+const openHistory = (tripId: string) => {
+  router.push(`/result?id=${tripId}`)
+}
+
+// 删除历史计划
+const handleDeleteHistory = async (tripId: string) => {
+  try {
+    await deleteTrip(tripId)
+    message.success('已删除')
+    historyList.value = historyList.value.filter(item => item.id !== tripId)
+  } catch (e: any) {
+    message.error(e.message || '删除失败')
+  }
+}
+
+onMounted(() => {
+  loadHistory()
+})
 
 // 监听日期变化，自动计算旅行天数
 watch([() => formData.start_date, () => formData.end_date], ([start, end]) => {
@@ -369,6 +446,8 @@ const handleSubmit = async () => {
       if (data) {
         sessionStorage.setItem('tripPlan', JSON.stringify(data))
         message.success('旅行计划生成成功！')
+        // 刷新历史列表
+        loadHistory()
 
         setTimeout(() => {
           loading.value = false
@@ -404,7 +483,7 @@ const handleSubmit = async () => {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 60px 20px;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* 背景装饰 */
@@ -502,9 +581,104 @@ const handleSubmit = async () => {
   font-weight: 300;
 }
 
+/* ===== 主布局 ===== */
+.home-layout {
+  max-width: 1700px;
+  margin: 0 auto;
+  display: flex;
+  gap: 24px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== 左侧历史侧边栏 ===== */
+.history-sidebar {
+  position: sticky;
+  top: 10px; 
+  width: 280px;
+  min-width: 250px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 16px;
+  padding: 16px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  animation: fadeInLeft 0.6s ease-out;
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #667eea;
+}
+
+.history-empty {
+  text-align: center;
+  color: #999;
+  padding: 30px 0;
+  font-size: 14px;
+}
+
+.history-item {
+  padding: 12px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid #eee;
+}
+
+.history-item:hover {
+  background: linear-gradient(135deg, #f5f7ff 0%, #ecefff 100%);
+  border-color: #667eea;
+  transform: translateX(4px);
+}
+
+.history-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.history-city {
+  font-weight: 600;
+  font-size: 15px;
+  color: #333;
+}
+
+.history-delete {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.history-item:hover .history-delete {
+  opacity: 1;
+}
+
+.history-item-info {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #999;
+}
+
+/* ===== 右侧主区域 ===== */
+.main-area {
+  flex: 1;
+  min-width: 0;
+}
+
 /* 表单卡片 */
 .form-card {
-  max-width: 1400px;
+  max-width: 1100px;
   margin: 0 auto;
   border-radius: 24px;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
@@ -781,6 +955,17 @@ const handleSubmit = async () => {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes fadeInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
 }
 </style>
