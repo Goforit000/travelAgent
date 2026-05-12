@@ -31,6 +31,13 @@ PLANNER_SYSTEM_PROMPT = """你是一个专业的旅行规划师。
 5. 生成合理的预算估算
 6. 每天的景点必须来自同一区域分组（同一"### 区域名"下的景点）。
    不要跨区域选景点。景点已按空间距离分组并附带了附近酒店列表。
+7. 出行人数与预算规则
+1）必须读取用户提供的出行人数，并在行程安排中考虑多人出行的舒适度，不安排过密路线。
+2）你只负责生成可核算的基础单价，不能把费用乘以出行人数、房间数或车辆数。
+3） attractions[].ticket_price 必须是单人票价。
+4） meals[].estimated_cost 必须是单人单餐费用。
+5） hotel.estimated_cost 必须是每间每晚费用。
+6） budget.total_transportation 必须是全程交通单价：非自驾为每人这些天费用，自驾为每辆车这些天费用
 
 请严格按照以下 JSON 格式输出，不要添加任何其他内容，不要用 markdown 代码块:
 
@@ -192,6 +199,7 @@ class PlannerAgent(BaseAgent):
         start_date = getattr(request, "start_date", "")
         end_date = getattr(request, "end_date", "")
         travel_days = getattr(request, "travel_days", 1)
+        people_count = max(1, int(getattr(request, "people_count", 1) or 1))
         transportation = getattr(request, "transportation", "公共交通")
         accommodation = getattr(request, "accommodation", "经济型酒店")
         preferences = getattr(request, "preferences", [])
@@ -208,6 +216,7 @@ class PlannerAgent(BaseAgent):
 - 城市: {city}
 - 日期范围: {start_date} 至 {end_date}
 - 旅行天数: {travel_days} 天
+- 出行人数: {people_count} 人
 - 交通方式: {transportation}
 - 住宿偏好: {accommodation}
 - 用户偏好: {', '.join(preferences) if preferences else '无特殊偏好'}"""
@@ -236,12 +245,15 @@ class PlannerAgent(BaseAgent):
                 try:
                     payload_json = budget_value.split("|", 1)[1]
                     payload = json.loads(payload_json)
-                    target = payload.get("target_budget", 0)
+                    target = payload.get("target_budget_total", payload.get("target_budget", 0))
+                    per_person = payload.get("target_budget_per_person", 0)
+                    people = payload.get("people_count", people_count)
                     overshoot = payload.get("overshoot_amount", 0)
                     suggestions = payload.get("savings_suggestions", [])
                     print(f"budget的建议：{suggestions}")
                     budget_info_text = f"\n## 预算约束（第 {revision_round + 1} 次修正）\n"
                     budget_info_text += f"- 目标总预算上限: {target} 元（必须严格遵守）\n"
+                    budget_info_text += f"- 出行人数: {people} 人；人均预算上限: {per_person} 元\n"
                     budget_info_text += f"- 当前超支金额: {overshoot} 元\n"
                     budget_info_text += f"- 已修正轮数: {revision_round}\n"
                     budget_info_text += f"\n### Budget Agent 的削减建议（按此执行）:\n"
@@ -527,6 +539,8 @@ def _get_revision_prompt(state: TripState) -> str:
     agent_outputs = state.get("agent_outputs", {})
     budget_value = agent_outputs.get("budget_agent", "")
     target_budget = 0
+    target_budget_per_person = 0
+    people_count = 1
     overshoot_amount = 0
     savings_text = ""
 
@@ -534,7 +548,9 @@ def _get_revision_prompt(state: TripState) -> str:
         try:
             payload_json = budget_value.split("|", 1)[1]
             payload = json.loads(payload_json)
-            target_budget = payload.get("target_budget", 0)
+            target_budget = payload.get("target_budget_total", payload.get("target_budget", 0))
+            target_budget_per_person = payload.get("target_budget_per_person", 0)
+            people_count = payload.get("people_count", 1)
             overshoot_amount = payload.get("overshoot_amount", 0)
             suggestions = payload.get("savings_suggestions", [])
             for s in suggestions:
@@ -546,6 +562,8 @@ def _get_revision_prompt(state: TripState) -> str:
 
 ## 预算约束（必须遵守）
 - 目标总预算上限: {target_budget} 元
+- 出行人数: {people_count} 人
+- 人均预算上限: {target_budget_per_person} 元
 - 当前超支金额: {overshoot_amount} 元
 - 调整后总费用必须 ≤ {target_budget} 元
 
@@ -555,14 +573,18 @@ def _get_revision_prompt(state: TripState) -> str:
 ## 调整规则
 1. 保持景点名称、地址、坐标不变（这些是真实数据）
 2. 只改动费用相关字段: ticket_price, estimated_cost, hotel.type, hotel.estimated_cost, hotel.price_range, meals[].estimated_cost
-3. 酒店降级示例: "豪华酒店"→"舒适型酒店"，estimated_cost 800→350
-4. 景点削减: 将部分 ticket_price>100 的付费景点替换为 ticket_price=0 的免费景点
-5. 餐饮调整: 晚餐 estimated_cost 80→40，午餐 50→30
-6. 交通优化: 如需可改 transportation 字段
-7. 每天仍保持 2-3 个景点，三餐不缺
-8. budget 字段必须重新计算，total 必须 ≤ {target_budget}
-9. 景点仍须来自同一区域分组
-10. 不同区域的天必须选不同酒店，酒店须与当天景点区域匹配
+3. ticket_price 必须是单人票价，不能乘以出行人数
+4. meals[].estimated_cost 必须是单人单餐费用，不能乘以出行人数
+5. hotel.estimated_cost 必须是每间每晚费用，不能乘以房间数
+6. budget.total_transportation 必须是全程交通单价：非自驾为每人这些天费用，自驾为每辆车这些天费用
+7. 酒店降级示例: "豪华酒店"→"舒适型酒店"，hotel.estimated_cost 800→350
+8. 景点削减: 将部分 ticket_price>100 的付费景点替换为 ticket_price=0 的免费景点
+9. 餐饮调整: 晚餐 estimated_cost 80→40，午餐 50→30
+10. 交通优化: 如需可改 transportation 字段或降低 budget.total_transportation 全程交通单价
+11. 每天仍保持 2-3 个景点，三餐不缺
+12. budget.total 可以作为草稿，但所有单价必须能让 Budget Agent 复核后的团队总费用 ≤ {target_budget}
+13. 景点仍须来自同一区域分组
+14. 不同区域的天必须选不同酒店，酒店须与当天景点区域匹配
 
 ## 输出格式
 与首次规划完全相同，输出完整 JSON（包含 city/start_date/end_date/days/weather_info/overall_suggestions/budget 全部字段）。

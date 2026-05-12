@@ -98,8 +98,17 @@ async def event_generator(initial_state: dict) -> str:
 
                 trip_id = ""
                 if plan_data is not None:
+                    request = initial_state.get("request")
+                    people_count = max(1, int(getattr(request, "people_count", 1) or 1)) if request else 1
+                    if hasattr(plan_data, "people_count"):
+                        try:
+                            plan_data.people_count = people_count
+                        except Exception:
+                            pass
+                    elif isinstance(plan_data, dict):
+                        plan_data["people_count"] = people_count
+
                     try:
-                        request = initial_state.get("request")
                         if request:
                             trip_id = sqlite_store.save_trip(request, plan_data)
                     except Exception as e:
@@ -158,6 +167,11 @@ async def plan_trip(request: TripRequest):
 
         # 自动存档
         if trip_plan is not None:
+            if hasattr(trip_plan, "people_count"):
+                try:
+                    trip_plan.people_count = max(1, int(getattr(request, "people_count", 1) or 1))
+                except Exception:
+                    pass
             try:
                 sqlite_store.save_trip(request, trip_plan)
             except Exception as e:

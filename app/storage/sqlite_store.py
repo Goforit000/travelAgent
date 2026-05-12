@@ -32,12 +32,16 @@ def init_db():
             start_date  TEXT NOT NULL,
             end_date    TEXT NOT NULL,
             travel_days INTEGER NOT NULL,
+            people_count INTEGER DEFAULT 1,
             preferences TEXT DEFAULT '[]',
             budget_total REAL,
             trip_data   TEXT NOT NULL,
             created_at  TEXT NOT NULL
         )
     """)
+    columns = [row["name"] for row in conn.execute("PRAGMA table_info(trips)").fetchall()]
+    if "people_count" not in columns:
+        conn.execute("ALTER TABLE trips ADD COLUMN people_count INTEGER DEFAULT 1")
     conn.commit()
     conn.close()
 
@@ -56,10 +60,24 @@ def save_trip(request, trip_plan) -> str:
     init_db()
     trip_id = uuid.uuid4().hex[:12]
     conn = _get_conn()
+    people_count = max(1, int(getattr(request, "people_count", 1) or 1))
+    if hasattr(trip_plan, "people_count"):
+        try:
+            trip_plan.people_count = people_count
+        except Exception:
+            pass
+
+    if hasattr(trip_plan, "model_dump"):
+        trip_data = trip_plan.model_dump()
+        trip_data["people_count"] = people_count
+        trip_json = json.dumps(trip_data, ensure_ascii=False)
+    else:
+        trip_json = json.dumps({"people_count": people_count}, ensure_ascii=False)
+
     conn.execute(
         """
-        INSERT INTO trips (id, city, start_date, end_date, travel_days, preferences, budget_total, trip_data, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trips (id, city, start_date, end_date, travel_days, people_count, preferences, budget_total, trip_data, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             trip_id,
@@ -67,9 +85,10 @@ def save_trip(request, trip_plan) -> str:
             getattr(request, "start_date", ""),
             getattr(request, "end_date", ""),
             getattr(request, "travel_days", 0),
+            people_count,
             json.dumps(getattr(request, "preferences", []), ensure_ascii=False),
             trip_plan.budget.total if (trip_plan and trip_plan.budget) else None,
-            trip_plan.model_dump_json() if hasattr(trip_plan, "model_dump_json") else json.dumps({}),
+            trip_json,
             datetime.now().isoformat(),
         ),
     )
@@ -88,7 +107,7 @@ def list_trips(limit: int = 20) -> list[dict]:
     init_db()
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT id, city, start_date, end_date, travel_days, preferences, budget_total, created_at FROM trips ORDER BY created_at DESC LIMIT ?",
+        "SELECT id, city, start_date, end_date, travel_days, people_count, preferences, budget_total, created_at FROM trips ORDER BY created_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
     conn.close()

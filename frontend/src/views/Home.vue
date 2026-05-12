@@ -36,6 +36,8 @@
           >
             <div class="history-item-top">
               <span class="history-city">🏙️ {{ item.city }}</span>
+              <span class="history-item-info">{{ item.travel_days }}天</span>
+              <span class="history-item-info">{{ item.people_count || 1 }}人</span>
               <a-popconfirm
                 title="确定删除该计划？"
                 ok-text="删除"
@@ -48,7 +50,6 @@
             </div>
             <div class="history-item-info">
               <span>{{ item.start_date }} ~ {{ item.end_date }}</span>
-              <span>{{ item.travel_days }}天</span>
               <span v-if="item.budget_total">¥{{ item.budget_total.toLocaleString() }}</span>
             </div>
           </div>
@@ -71,7 +72,7 @@
               </div>
 
               <a-row :gutter="24">
-                <a-col :span="8">
+                <a-col :span="6">
                   <a-form-item name="city" :rules="[{ required: true, message: '请输入目的地城市' }]">
                     <template #label>
                       <span class="form-label">目的地城市</span>
@@ -139,7 +140,7 @@
 
               <!-- 第一行：交通方式 + 住宿偏好 + 预算 -->
               <a-row :gutter="24">
-                <a-col :span="8">
+                <a-col :span="6">
                   <a-form-item name="transportation">
                     <template #label>
                       <span class="form-label">交通方式</span>
@@ -152,7 +153,7 @@
                     </a-select>
                   </a-form-item>
                 </a-col>
-                <a-col :span="8">
+                <a-col :span="6">
                   <a-form-item name="accommodation">
                     <template #label>
                       <span class="form-label">住宿偏好</span>
@@ -165,11 +166,36 @@
                     </a-select>
                   </a-form-item>
                 </a-col>
-                <a-col :span="8">
+                <a-col :span="6">
+                  <a-form-item name="people_count" :rules="[{ required: true, message: '请输入出行人数' }]">
+                    <template #label>
+                      <span class="form-label">出行人数</span>
+                    </template>
+                    <a-input-number
+                      v-model:value="formData.people_count"
+                      :min="1"
+                      :max="20"
+                      :precision="0"
+                      size="large"
+                      style="width: 100%"
+                      class="custom-input"
+                    />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="6">
                   <a-form-item name="target_budget">
                     <template #label>
-                      <span class="form-label">总预算上限</span>
-                    </template>
+                      <span class="form-label">预算上限</span>
+                        <div class="budget-display">
+                          <template v-if="formData.target_budget <= 19900">
+                            <span class="budget-value">¥{{ formData.target_budget.toLocaleString() }}</span>
+                            <span class="budget-hint">/ 人</span>
+                          </template>
+                          <template v-else>
+                            <span class="budget-value">不限</span>
+                          </template>
+                        </div>
+                      </template>
                     <div class="budget-slider-wrapper">
                       <a-slider
                         v-model:value="formData.target_budget"
@@ -179,16 +205,9 @@
                         :marks="budgetMarks"
                         class="budget-slider"
                       />
-                      <div class="budget-display">
-                        <template v-if="formData.target_budget <= 19900">
-                          <span class="budget-value">¥{{ formData.target_budget.toLocaleString() }}</span>
-                          <span class="budget-hint"></span>
-                        </template>
-                        <template v-else>
-                          <span class="budget-value">不限</span>
-                        </template>
-                      </div>
+                      
                     </div>
+                    
                   </a-form-item>
                 </a-col>
               </a-row>
@@ -313,6 +332,7 @@ const formData = reactive<Omit<TripFormData, 'start_date' | 'end_date'> & { star
   preferences: [],
   free_text_input: '',
   target_budget: 5000,
+  people_count: 1,
 })
 
 // 预算滑块刻度
@@ -404,6 +424,7 @@ const handleSubmit = async () => {
     accommodation: formData.accommodation,
     preferences: formData.preferences,
     free_text_input: formData.free_text_input,
+    people_count: formData.people_count,
     // 不限制预算时传 0（后端判为无上限）
     target_budget: formData.target_budget >= 20000 ? 0 : formData.target_budget,
   }

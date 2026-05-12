@@ -9,6 +9,7 @@
 """
 
 import json
+import math
 from langchain_core.tools import tool
 
 
@@ -17,6 +18,8 @@ def calculate_budget_tool(
     trip_plan_json: str,
     hotel_cost_per_night: int = 150,
     transport_cost_per_day: int = 50,
+    people_count: int = 1,
+    transportation: str = "",
 ) -> str:
     """
     精确计算旅行计划的总预算。
@@ -27,8 +30,12 @@ def calculate_budget_tool(
                         可以是纯 JSON 或包含 ```json 代码块的文本。
                         必须包含 days 数组，每个 day 包含 attractions、meals、hotel 字段。
         hotel_cost_per_night: 如果行程中没有指定酒店费用，使用此参数作为每晚酒店估算费用。
-                              默认为 150。
-        transport_cost_per_day: 每日交通费用估算，默认为 50 元/天。
+        transport_cost_per_day: 如果行程中没有指定交通费用，使用此参数作为交通估算日费用。
+                                非自驾表示每人每天费用；自驾表示每辆车每天费用。
+        people_count: 出行人数。门票和餐饮按人数乘；酒店按每 2 人一间房估算。
+        transportation: 用户选择的交通方式。Planner 提供的 budget.total_transportation 表示全程交通单价：
+                        非自驾为每人这些天费用；自驾为每辆车这些天费用。
+                        缺失时使用 transport_cost_per_day * travel_days 估算对应的全程交通单价。
 
     Returns:
         JSON 字符串，包含详细预算明细：
@@ -64,6 +71,12 @@ def calculate_budget_tool(
             **defaults,
             "error": f"JSON 根必须为对象，实际类型: {type(plan).__name__}",
         }, ensure_ascii=False)
+
+    try:
+        people_count = max(1, int(people_count or 1))
+    except (TypeError, ValueError):
+        people_count = 1
+    rooms = max(1, math.ceil(people_count / 2))
 
     days = plan.get("days", [])
 
@@ -114,8 +127,9 @@ def calculate_budget_tool(
 
                 price = attr.get("ticket_price", 0)
                 if isinstance(price, (int, float)) and price >= 0:
-                    total_attractions += price
-                    day_costs["attractions"] += price
+                    ticket_total = int(price * people_count)
+                    total_attractions += ticket_total
+                    day_costs["attractions"] += ticket_total
                 else:
                     warnings.append({
                         "type": "invalid_ticket_price",
@@ -144,8 +158,9 @@ def calculate_budget_tool(
 
                 cost = meal.get("estimated_cost", 0)
                 if isinstance(cost, (int, float)) and cost >= 0:
-                    total_meals += cost
-                    day_costs["meals"] += cost
+                    meal_total = int(cost * people_count)
+                    total_meals += meal_total
+                    day_costs["meals"] += meal_total
                 else:
                     warnings.append({
                         "type": "invalid_meal_cost",
@@ -166,8 +181,9 @@ def calculate_budget_tool(
             if isinstance(hotel, dict):
                 hotel_cost = hotel.get("estimated_cost", 0)
                 if isinstance(hotel_cost, (int, float)) and hotel_cost > 0:
-                    total_hotels += hotel_cost
-                    day_costs["hotel"] = hotel_cost
+                    hotel_total = int(hotel_cost * rooms)
+                    total_hotels += hotel_total
+                    day_costs["hotel"] = hotel_total
             else:
                 warnings.append({
                     "type": "invalid_hotel",
@@ -179,22 +195,45 @@ def calculate_budget_tool(
 
     # 如果行程中没有任何酒店费用，用估算值
     if total_hotels == 0 and hotel_cost_per_night > 0:
-        total_hotels = hotel_cost_per_night * travel_days
+        total_hotels = hotel_cost_per_night * travel_days * rooms
         warnings.append({
             "type": "hotel_estimated",
-            "message": f"行程中未包含酒店费用，使用估算值 {hotel_cost_per_night}元/晚 × {travel_days}晚",
+            "message": f"未提供酒店费用，按 {hotel_cost_per_night} 元/间/晚 × {travel_days} 晚 × {rooms} 间估算",
         })
 
-    # 优先用行程 JSON 中的交通预算，缺失时才用参数估算
+    # 优先用 Planner 提供的全程交通单价，缺失时才用参数估算。
+    # 约定：
+    # - 非自驾：plan.budget.total_transportation = 每人这些天费用；
+    # - 自驾：plan.budget.total_transportation = 每辆车这些天费用；
+    # - transport_cost_per_day = 非自驾每人每天费用 / 自驾每辆车每天费用。
     plan_budget = plan.get("budget", {}) if isinstance(plan.get("budget"), dict) else {}
     plan_transport = plan_budget.get("total_transportation", 0)
     if isinstance(plan_transport, (int, float)) and plan_transport > 0:
-        total_transportation = int(plan_transport)
+        transport_unit_total = int(plan_transport)
+        transport_source = "planner"
     else:
-        total_transportation = transport_cost_per_day * travel_days
+        transport_unit_total = transport_cost_per_day * travel_days
+        transport_source = "estimated"
+
+    if "自驾" in transportation:
+        vehicles = max(1, math.ceil(people_count / 4))
+        total_transportation = transport_unit_total * vehicles
+        transport_message = (
+            f"未提供交通预算，按自驾 {transport_cost_per_day} 元/车/天 × "
+            f"{travel_days} 天 × {vehicles} 辆估算"
+        )
+    else:
+        vehicles = 0
+        total_transportation = transport_unit_total * people_count
+        transport_message = (
+            f"未提供交通预算，按 {transport_cost_per_day} 元/人/天 × {travel_days} 天 × "
+            f"{people_count} 人估算"
+        )
+
+    if transport_source == "estimated":
         warnings.append({
             "type": "transport_estimated",
-            "message": f"行程中未包含交通费用，使用估算值 {transport_cost_per_day}元/天 × {travel_days}天",
+            "message": transport_message,
         })
 
     total = total_attractions + total_hotels + total_meals + total_transportation
@@ -217,6 +256,11 @@ def calculate_budget_tool(
         "total_meals": total_meals,
         "total_transportation": total_transportation,
         "total": total,
+        "people_count": people_count,
+        "rooms": rooms,
+        "vehicles": vehicles,
+        "transport_unit_total": transport_unit_total,
+        "transport_cost_per_day": transport_cost_per_day,
         "breakdown": daily_breakdown,
         "warnings": warnings,
     }, ensure_ascii=False, indent=2)
@@ -232,6 +276,7 @@ def suggest_savings_tool(
     current_budget_json: str,
     target_budget: int = 0,
     travel_days: int = 1,
+    people_count: int = 1,
 ) -> str:
     """
     分析当前预算并提供可行的削减方案。
@@ -249,6 +294,7 @@ def suggest_savings_tool(
                              total_transportation / total 字段。
         target_budget: 用户的目标预算上限（元），为 0 表示无上限约束。
         travel_days: 旅行天数，用于计算日均费用。
+        people_count: 出行人数，用于在削减建议中保留团队规模信息。
 
     Returns:
         JSON 字符串，包含削减建议：
@@ -275,6 +321,11 @@ def suggest_savings_tool(
             "suggestions": [],
         }, ensure_ascii=False)
 
+    try:
+        people_count = max(1, int(people_count or 1))
+    except (TypeError, ValueError):
+        people_count = 1
+
     current_total = budget.get("total", 0)
     overshoot = max(0, current_total - target_budget) if target_budget > 0 else 0
 
@@ -285,6 +336,7 @@ def suggest_savings_tool(
         return json.dumps({
             "current_total": current_total,
             "target_budget": target_budget,
+            "people_count": people_count,
             "overshoot": 0,
             "message": "预算在目标范围内，无需削减",
             "suggestions": [],
@@ -387,6 +439,7 @@ def suggest_savings_tool(
     return json.dumps({
         "current_total": current_total,
         "target_budget": target_budget if target_budget > 0 else None,
+        "people_count": people_count,
         "overshoot": overshoot,
         "suggestions": suggestions,
         "adjusted_total": adjusted_total,

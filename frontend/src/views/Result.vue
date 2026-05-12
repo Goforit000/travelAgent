@@ -70,9 +70,15 @@
             <!-- 行程概览 -->
             <a-card id="overview" :title="`${tripPlan.city}旅行计划`" :bordered="false" class="overview-card">
               <div class="overview-content">
-                <div class="info-item">
-                  <span class="info-label">📅 日期:</span>
-                  <span class="info-value">{{ tripPlan.start_date }} 至 {{ tripPlan.end_date }}</span>
+                <div class="info-group">
+                  <div class="info-item">
+                    <span class="info-label">📅 日期:</span>
+                    <span class="info-value">{{ tripPlan.start_date }} 至 {{ tripPlan.end_date }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">👥 人数:</span>
+                    <span class="info-value">{{ tripPlan.people_count || 1 }} 人</span>
+                  </div>
                 </div>
                 <div class="info-item">
                   <span class="info-label">💡 建议:</span>
@@ -195,7 +201,7 @@
                           <span class="badge-number">{{ index + 1 }}</span>
                         </div>
                         <div v-if="item.ticket_price" class="price-tag">
-                          ¥{{ item.ticket_price }}
+                          ¥{{ item.ticket_price }}/人
                         </div>
                       </div>
 
@@ -234,8 +240,8 @@
                   <a-descriptions-item label="距离" :span="2">{{ day.hotel.distance }}</a-descriptions-item>
                   <a-descriptions-item label="类型">{{ day.hotel.type }}</a-descriptions-item>
                   <a-descriptions-item label="评分">{{ day.hotel.rating }}⭐</a-descriptions-item>
-                  <a-descriptions-item label="价格范围">{{ day.hotel.price_range }}</a-descriptions-item>
-                  <a-descriptions-item label="预估花费">{{ day.hotel.estimated_cost }}元</a-descriptions-item>
+                  <a-descriptions-item label="价格范围">{{ day.hotel.price_range }}/间</a-descriptions-item>
+                  <a-descriptions-item label="预估花费">{{ day.hotel.estimated_cost }}元/间</a-descriptions-item>
                 </a-descriptions>
               </a-card>
 
@@ -250,7 +256,7 @@
                   <template #label>
                     {{ getMealLabel(meal.type) }}
                     <span v-if="meal.estimated_cost != null" style="margin-left: 8px">
-                      ¥{{ meal.estimated_cost }}
+                      ¥{{ meal.estimated_cost }} / 人
                     </span>
                   </template>
                   {{ meal.name }}
@@ -1117,6 +1123,12 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.info-group {
+  display: flex;
+  flex-direction: row;    
+  gap: 56px;               
 }
 
 .info-item {

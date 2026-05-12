@@ -334,6 +334,13 @@ def finalize_node(state: TripState) -> dict:
 
     # ——— 步骤 3：配图 ———
     if trip_plan is not None:
+        request = state.get("request")
+        if request is not None and hasattr(trip_plan, "people_count"):
+            try:
+                trip_plan.people_count = max(1, int(getattr(request, "people_count", 1) or 1))
+            except Exception:
+                trip_plan.people_count = 1
+
         new_photos: dict[str, str] = {}
         for day in trip_plan.days:
             for attraction in day.attractions:
@@ -502,6 +509,7 @@ def _create_fallback_plan(request, state) -> "TripPlan":
         city=request.city,
         start_date=request.start_date,
         end_date=request.end_date,
+        people_count=max(1, int(getattr(request, "people_count", 1) or 1)),
         days=days,
         weather_info=weather_info,
         overall_suggestions=fallback_desc,

@@ -54,6 +54,7 @@ class POIAgent(BaseAgent):
 - 每次搜索后评估结果，如果返回为空或很少（< 3 条），换关键词补搜
 - 如果已收集的景点数（去重后）达到 target_count，立即停止搜索并输出最终结果
 - 多搜无益，Planner 只使用 target_count 个景点
+- 多人出行时，优先选择容量大、通行便利、动线友好、适合多人共同活动的景点
 - 输出必须是有效 JSON，格式为:
   {"summary": "搜索总结", "keywords_used": ["关键词1", "关键词2"], "total_found": N, "attractions": [...]}
   其中 attractions 是去重合并后的景点列表"""
@@ -64,7 +65,7 @@ class POIAgent(BaseAgent):
 
     @property
     def max_steps(self) -> int:
-        return 5
+        return 8
 
     def _build_context_message(self, state: TripState) -> str:
         """构造 POI 搜索的上下文信息"""
@@ -75,6 +76,7 @@ class POIAgent(BaseAgent):
         city = getattr(request, "city", "未知")
         preferences = getattr(request, "preferences", [])
         travel_days = getattr(request, "travel_days", 1)
+        people_count = max(1, int(getattr(request, "people_count", 1) or 1))
         free_text = getattr(request, "free_text_input", "")
         target_count = travel_days * 5
 
@@ -82,6 +84,7 @@ class POIAgent(BaseAgent):
 
 目的地城市：{city}
 旅行天数：{travel_days} 天
+出行人数：{people_count} 人
 旅行偏好：{', '.join(preferences) if preferences else '无特别偏好（搜索"热门景点"）'}"""
 
         if free_text:

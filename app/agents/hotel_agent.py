@@ -51,6 +51,7 @@ class HotelAgent(BaseAgent):
 - 必须至少搜索 1 次（不同关键词或不同区域），保证空间覆盖
 - 如果已收集的去重后酒店数达到 target_count，立即停止搜索
 - 如果结果不足（< 3 条），换一个相关关键词或另一个区域补搜
+- 按出行人数调整住宿搜索偏好：1-2 人优先普通房型；3-4 人优先家庭房、套房、民宿；5 人以上优先民宿、公寓酒店、套房或多房间酒店
 - 输出必须是有效 JSON，格式为:
   {"summary": "搜索总结", "keywords_used": ["关键词1"], "total_found": N, "hotels": [...]}
   其中 hotels 是去重合并后的酒店列表"""
@@ -72,13 +73,21 @@ class HotelAgent(BaseAgent):
         city = getattr(request, "city", "未知")
         accommodation = getattr(request, "accommodation", "经济型酒店")
         travel_days = getattr(request, "travel_days", 1)
+        people_count = max(1, int(getattr(request, "people_count", 1) or 1))
         free_text = getattr(request, "free_text_input", "")
         target_count = travel_days * 5
+        if people_count <= 2:
+            room_hint = "1-2 人：优先普通大床房/双床房，兼顾交通便利"
+        elif people_count <= 4:
+            room_hint = "3-4 人：优先家庭房、套房、民宿，可搜索“家庭房”“套房”“民宿”"
+        else:
+            room_hint = "5 人以上：优先民宿、公寓酒店、套房或多房间酒店，可搜索“民宿”“公寓酒店”“多房间”"
 
         context = f"""请为以下旅行需求搜索酒店：
 
 目的地城市：{city}
 住宿偏好：{accommodation}
+出行人数：{people_count} 人
 旅行天数：{travel_days} 天"""
 
         if free_text:
@@ -87,6 +96,7 @@ class HotelAgent(BaseAgent):
         context += f"""
 
 目标收集酒店数量：{target_count} 个（每天 1 个 × {travel_days} 天 + 备用）。
+住宿房型策略：{room_hint}
 收集到 {target_count} 个去重酒店后立即停止搜索，多搜无益。
 
 请首先用住宿偏好 "{accommodation}" 作为关键词调用 search_hotels_tool 进行第一次搜索。

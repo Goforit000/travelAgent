@@ -93,6 +93,7 @@ export interface TripPlan {
   city: string
   start_date: string
   end_date: string
+  people_count?: number
   days: DayPlan[]
   weather_info: WeatherInfo[]
   overall_suggestions: string
@@ -119,6 +120,7 @@ export interface TripFormData {
   preferences: string[]
   free_text_input: string
   target_budget: number
+  people_count: number
 }
 
 export interface TripPlanResponse {
@@ -135,6 +137,7 @@ export interface HistoryItem {
   start_date: string
   end_date: string
   travel_days: number
+  people_count: number
   preferences: string[]
   budget_total: number | null
   created_at: string
