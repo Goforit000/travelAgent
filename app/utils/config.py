@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # 高德地图
     amap_api_key: str = ""
 
+    # 12306 MCP
+    mcp_12306_url: str = "http://localhost:8001/mcp"
+
     # Unsplash
     unsplash_access_key: str = ""
 

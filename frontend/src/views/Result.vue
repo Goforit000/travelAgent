@@ -155,12 +155,7 @@
                   </div>
                   <div v-else-if="tripPlan.intercity_transport.outbound.is_estimated" class="route-service estimated">
                     估算数据，未获取到真实班次
-                  </div>
-                  <div class="route-detail" v-if="tripPlan.intercity_transport.outbound.departure_place || tripPlan.intercity_transport.outbound.arrival_place">
-                    {{ tripPlan.intercity_transport.outbound.departure_place || tripPlan.intercity_transport.outbound.origin }}
-                    →
-                    {{ tripPlan.intercity_transport.outbound.arrival_place || tripPlan.intercity_transport.outbound.destination }}
-                  </div>
+                  </div>      
                   <div class="route-detail" v-if="tripPlan.intercity_transport.outbound.departure_time || tripPlan.intercity_transport.outbound.arrival_time">
                     出发: {{ formatIntercityTime(tripPlan.intercity_transport.outbound.departure_time) }}
                     · 到达: {{ formatIntercityTime(tripPlan.intercity_transport.outbound.arrival_time) }}
@@ -175,6 +170,7 @@
                   <div class="route-main">
                     {{ tripPlan.intercity_transport.return_trip.origin }} → {{ tripPlan.intercity_transport.return_trip.destination }}
                   </div>
+
                   <div class="route-meta">
                     {{ tripPlan.intercity_transport.return_trip.date }} · {{ getIntercityModeLabel(tripPlan.intercity_transport.return_trip.mode) }} · {{ formatDuration(tripPlan.intercity_transport.return_trip.duration_minutes) }}
                   </div>
@@ -184,11 +180,7 @@
                   <div v-else-if="tripPlan.intercity_transport.return_trip.is_estimated" class="route-service estimated">
                     估算数据，未获取到真实班次
                   </div>
-                  <div class="route-detail" v-if="tripPlan.intercity_transport.return_trip.departure_place || tripPlan.intercity_transport.return_trip.arrival_place">
-                    {{ tripPlan.intercity_transport.return_trip.departure_place || tripPlan.intercity_transport.return_trip.origin }}
-                    →
-                    {{ tripPlan.intercity_transport.return_trip.arrival_place || tripPlan.intercity_transport.return_trip.destination }}
-                  </div>
+              
                   <div class="route-detail" v-if="tripPlan.intercity_transport.return_trip.departure_time || tripPlan.intercity_transport.return_trip.arrival_time">
                     出发: {{ formatIntercityTime(tripPlan.intercity_transport.return_trip.departure_time) }}
                     · 到达: {{ formatIntercityTime(tripPlan.intercity_transport.return_trip.arrival_time) }}
@@ -1448,7 +1440,7 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
 }
 
 .route-service {
-  margin-bottom: 6px;
+  margin-bottom: 2px;
   color: #333;
   font-size: 14px;
   font-weight: 700;
