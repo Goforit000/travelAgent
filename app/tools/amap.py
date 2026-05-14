@@ -10,11 +10,14 @@
 - search_hotels_tool      : 搜索酒店
 - query_weather_tool      : 查询天气
 """
+from __future__ import annotations
+
 import json
 from typing import Any
 
 import httpx
 from langchain_core.tools import tool
+
 from app.utils.config import settings
 
 # 高德地图 Web API 的基础地址

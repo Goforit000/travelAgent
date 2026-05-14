@@ -21,7 +21,6 @@ from langchain_core.tools import tool
 from app.tools.amap import AMAP_BASE_URL, amap_get, format_amap_point, geocode_city
 
 AMAP_DRIVING_URL = f"{AMAP_BASE_URL}/direction/driving"
-AMAP_TRANSIT_URL = f"{AMAP_BASE_URL}/direction/transit/integrated"
 
 IntercityMode = Literal["driving", "high_speed_rail", "flight"]
 
@@ -30,9 +29,6 @@ MODE_LABELS: dict[str, str] = {
     "high_speed_rail": "高铁/动车",
     "flight": "飞机",
 }
-
-HIGH_SPEED_RAIL_TYPE_CODES = {"2011", "2012", "2013"}
-HIGH_SPEED_RAIL_KEYWORDS = ("高铁", "动车", "城际", "G", "D", "C")
 
 FUEL_COST_PER_KM_PER_VEHICLE = 0.75
 DEFAULT_DRIVING_TOLL_PER_KM = 0.45
@@ -67,37 +63,6 @@ def _to_int(value: Any, default: int = 0) -> int:
         return int(float(value))
     except (TypeError, ValueError):
         return default
-
-
-def _first_item(value: Any) -> Any:
-    """兼容高德字段可能返回列表或单个对象的情况。"""
-    if isinstance(value, list):
-        return value[0] if value else None
-    return value
-
-
-def _ensure_list(value: Any) -> list[Any]:
-    """把对象、列表或空值统一整理为列表。"""
-    if value is None or value == "":
-        return []
-    if isinstance(value, list):
-        return value
-    return [value]
-
-
-def _extract_text(value: Any) -> str:
-    """递归提取嵌套对象中的文本。"""
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-    if isinstance(value, list):
-        return " ".join(_extract_text(item) for item in value)
-    if isinstance(value, dict):
-        return " ".join(_extract_text(item) for item in value.values())
-    return str(value)
 
 
 def _haversine_km(origin: tuple[float, float], destination: tuple[float, float]) -> float:
@@ -159,170 +124,6 @@ def _call_amap_driving_route(
     )
     paths = data.get("route", {}).get("paths", [])
     return paths[0] if paths else None
-
-
-def _call_amap_transit_route(
-    origin: tuple[float, float],
-    destination: tuple[float, float],
-    origin_city: str,
-    destination_city: str,
-    strategy: str = "0",
-) -> list[dict[str, Any]]:
-    """
-    调用高德公交换乘接口（单次策略）。
-
-    高铁场景：只提取 railway 主交通段，地铁/公交接驳会被丢弃。
-    航班场景：提取 buslines 中的航班段。
-    """
-    _debug(
-        "调用高德公交换乘路径规划: "
-        f"origin={format_amap_point(origin)}, destination={format_amap_point(destination)}, "
-        f"city={origin_city}, cityd={destination_city}, strategy={strategy}"
-    )
-    data = amap_get(
-        AMAP_TRANSIT_URL,
-        params={
-            "origin": format_amap_point(origin),
-            "destination": format_amap_point(destination),
-            "city": origin_city,
-            "cityd": destination_city,
-            "extensions": "all",
-            "strategy": strategy,
-            "nightflag": "0",
-        },
-        timeout=12,
-    )
-    route = data.get("route", {})
-    transits = [item for item in route.get("transits", []) if isinstance(item, dict)]
-    print(f"[intercity_tools][TRACE] 高德公交换乘原始响应(strategy={strategy}): transits={len(transits)}, "
-          f"distance={route.get('distance')}, taxi_cost={route.get('taxi_cost')}")
-    if not transits:
-        print(f"[intercity_tools][TRACE] ⚠️ 高德公交换乘返回 transits 为空！route keys: {list(route.keys())}")
-    for index, transit in enumerate(transits[:5], 1):
-        railways = _iter_railways(transit)
-        seg_types: list[str] = []
-        for seg in _ensure_list(transit.get("segments")):
-            if isinstance(seg, dict):
-                has_bus = "bus" in seg and seg.get("bus", {}).get("buslines")
-                has_railway = "railway" in seg and seg.get("railway")
-                has_walking = "walking" in seg
-                types = []
-                if has_bus: types.append("bus")
-                if has_railway: types.append("railway")
-                if has_walking: types.append("walking")
-                seg_types.append("+".join(types) if types else "empty")
-        print(f"[intercity_tools][TRACE]   换乘候选 {index}: duration={transit.get('duration')}s, "
-              f"cost={transit.get('cost')}, segments={seg_types}, "
-              f"railways={len(railways)}, rail_names={[_railway_service_no(r) for r in railways]}, "
-              f"rail_types={[_railway_type(r) for r in railways]}")
-    return transits
-
-def _iter_railways(transit: dict[str, Any]) -> list[dict[str, Any]]:
-    """从高德换乘方案的 segments[].railway 中提取铁路段。"""
-    railways: list[dict[str, Any]] = []
-    for segment in _ensure_list(transit.get("segments")):
-        if not isinstance(segment, dict):
-            continue
-        for railway in _ensure_list(segment.get("railway")):
-            if isinstance(railway, dict) and railway:
-                railways.append(railway)
-    return railways
-
-
-def _railway_service_no(railway: dict[str, Any]) -> str:
-    """提取高铁/动车车次。"""
-    for key in ("trip", "name", "id"):
-        value = railway.get(key)
-        if value:
-            return str(value)
-    return ""
-
-
-def _railway_type(railway: dict[str, Any]) -> str:
-    """提取铁路类型。"""
-    for key in ("type", "typecode", "vehicle_type"):
-        value = railway.get(key)
-        if value:
-            return str(value)
-    return ""
-
-
-def _stop_name(stop: Any) -> str:
-    """提取站点名称。"""
-    stop = _first_item(stop)
-    if isinstance(stop, dict):
-        return str(stop.get("name", "") or stop.get("station", ""))
-    return str(stop) if stop else ""
-
-
-def _first_non_empty(*values: Any) -> str | None:
-    """返回第一个非空字符串。"""
-    for value in values:
-        if value is not None and str(value).strip():
-            return str(value).strip()
-    return None
-
-
-def _stop_time(stop: Any, railway: dict[str, Any], prefixes: tuple[str, ...]) -> str | None:
-    """从站点或 railway 对象中提取出发/到达时间。"""
-    stop = _first_item(stop)
-    candidates: list[Any] = []
-    if isinstance(stop, dict):
-        candidates.extend(
-            [
-                stop.get("time"),
-                stop.get("start_time"),
-                stop.get("end_time"),
-                stop.get("departure_time"),
-                stop.get("arrival_time"),
-            ]
-        )
-    for prefix in prefixes:
-        candidates.extend(
-            [
-                railway.get(f"{prefix}_time"),
-                railway.get(f"{prefix}time"),
-                railway.get(prefix),
-            ]
-        )
-    return _first_non_empty(*candidates)
-
-
-def _railway_min_ticket_cost(railway: dict[str, Any]) -> float:
-    """从 railway.spaces 中读取最低票价。"""
-    costs: list[float] = []
-    for space in _ensure_list(railway.get("spaces")):
-        if not isinstance(space, dict):
-            continue
-        cost = _to_float(space.get("cost"))
-        if cost > 0:
-            costs.append(cost)
-    return min(costs) if costs else 0.0
-
-
-def _railway_distance_km(railway: dict[str, Any]) -> float:
-    """提取铁路段距离，单位公里。"""
-    distance = _to_float(railway.get("distance"))
-    if distance > 10000:
-        return round(distance / 1000, 1)
-    return round(distance, 1)
-
-
-def _railway_score(railway: dict[str, Any]) -> int:
-    """给 railway 段打分，用于选择高铁/动车/城际主段。"""
-    service_no = _railway_service_no(railway)
-    railway_type = _railway_type(railway)
-    text = _extract_text(railway)
-    score = 30
-    if railway_type in HIGH_SPEED_RAIL_TYPE_CODES:
-        score += 120
-    if re.match(r"^[GDC]\d+", service_no):
-        score += 100
-    if any(keyword in text for keyword in HIGH_SPEED_RAIL_KEYWORDS):
-        score += 60
-    if "铁路" in text or "火车" in text:
-        score += 20
-    return score
 
 
 def _time_reasonableness_score(
@@ -458,136 +259,6 @@ def _normalize_driving_segment(
         "data_source": "amap_driving",
         "is_estimated": False,
     }
-
-def _iter_flights(transit: dict[str, Any]) -> list[dict[str, Any]]:
-    """从高德公交换乘方案的 segments 中提取飞机/航班段"""
-    flights: list[dict[str, Any]] = []
-    for segment in _ensure_list(transit.get("segments")):
-        if not isinstance(segment, dict):
-            continue
-        for busline in _ensure_list(segment.get("bus", {}).get("buslines", [])):
-            if not isinstance(busline, dict):
-                continue
-            bus_type = str(busline.get("type", ""))
-            bus_name = str(busline.get("name", ""))
-            if "飞机" in bus_type or "航班" in bus_type or "air" in bus_type.lower() or "飞机" in bus_name or "航班" in bus_name:
-                flights.append(busline)
-        # 也检查 railway 段中是否有航班标识
-        for railway in _ensure_list(segment.get("railway")):
-            if isinstance(railway, dict) and railway:
-                rtype = str(railway.get("type", ""))
-                if "飞机" in rtype or "航班" in rtype:
-                    flights.append(railway)
-    return flights
-
-
-def _flight_score(busline: dict[str, Any]) -> int:
-    """给航班段打分：优先直飞、时间合理的"""
-    score = 50
-    bus_type = str(busline.get("type", ""))
-    bus_name = str(busline.get("name", ""))
-    if "直飞" in bus_type or "直飞" in bus_name:
-        score += 100
-    if "经停" in bus_type or "经停" in bus_name or "中转" in bus_name:
-        score -= 30
-    return score
-
-
-def _select_flight_plan(
-    transits: list[dict[str, Any]],
-    direction: Literal["outbound", "return"] = "outbound",
-) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    """从高德换乘候选中选择最合适的航班段（方向感知时间评分）"""
-    candidates: list[tuple[int, int, dict[str, Any], dict[str, Any]]] = []
-    for transit in transits:
-        duration = _to_int(transit.get("duration"), 10**9)
-        for flight in _iter_flights(transit):
-            departure = str(flight.get("departure_time", "") or "")
-            arrival = str(flight.get("arrival_time", "") or "")
-            time_bonus = _time_reasonableness_score(departure, arrival, direction)
-            total = _flight_score(flight) + time_bonus
-            candidates.append((total, duration, transit, flight))
-
-    _debug(
-        "航班筛选分数: "
-        + json.dumps(
-            [
-                {
-                    "score": s,
-                    "duration": d,
-                    "name": f.get("name"),
-                    "type": f.get("type"),
-                    "departure_stop": f.get("departure_stop", {}).get("name") if isinstance(f.get("departure_stop"), dict) else f.get("departure_stop"),
-                    "arrival_stop": f.get("arrival_stop", {}).get("name") if isinstance(f.get("arrival_stop"), dict) else f.get("arrival_stop"),
-                }
-                for s, d, _t, f in candidates[:8]
-            ],
-            ensure_ascii=False,
-        )
-    )
-
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: (-item[0], item[1]))
-    score, duration, transit, flight = candidates[0]
-    if score < 30:
-        return None
-    _debug(f"航班命中: name={flight.get('name')}, score={score}, duration={duration}")
-    return transit, flight
-
-
-def _normalize_flight_segment(
-    transit: dict[str, Any],
-    flight: dict[str, Any],
-    origin_city: str,
-    destination_city: str,
-    date: str,
-    direction: Literal["outbound", "return"],
-    people_count: int,
-) -> dict[str, Any]:
-    """将高德航班段归一化为单程跨城交通结构"""
-    service_no = str(flight.get("name", "") or flight.get("trip", "") or "").strip() or None
-    departure_stop = flight.get("departure_stop")
-    arrival_stop = flight.get("arrival_stop")
-    departure_place = _stop_name(departure_stop) or origin_city
-    arrival_place = _stop_name(arrival_stop) or destination_city
-    departure_time = str(flight.get("departure_time", "") or flight.get("start_time", "") or "")
-    arrival_time = str(flight.get("arrival_time", "") or flight.get("end_time", "") or "")
-    price_per_person = _to_float(flight.get("cost") or flight.get("price") or transit.get("cost"))
-    distance_km = _to_float(flight.get("distance"))
-    if distance_km > 10000:
-        distance_km = round(distance_km / 1000, 1)
-    duration_minutes = _parse_time_minutes(departure_time or None, arrival_time or None) or max(1, math.ceil(_to_float(transit.get("duration")) / 60))
-    estimated_cost = int(round(price_per_person * max(1, people_count))) if price_per_person > 0 else 0
-
-    route_summary = (
-        f"{service_no or '航班'}: {departure_place}"
-        f"{' ' + departure_time if departure_time else ''} → {arrival_place}"
-        f"{' ' + arrival_time if arrival_time else ''}"
-    )
-
-    return {
-        "direction": direction,
-        "origin": origin_city,
-        "destination": destination_city,
-        "date": date,
-        "mode": "flight",
-        "duration_minutes": duration_minutes,
-        "distance_km": round(distance_km, 1),
-        "estimated_cost": estimated_cost,
-        "route_summary": route_summary,
-        "notes": ["数据来源：高德公交换乘航班段。"],
-        "service_no": service_no,
-        "carrier": "航班",
-        "departure_place": departure_place,
-        "arrival_place": arrival_place,
-        "departure_time": departure_time or None,
-        "arrival_time": arrival_time or None,
-        "price_per_person": round(price_per_person, 2) if price_per_person > 0 else None,
-        "data_source": "amap_flight",
-        "is_estimated": False,
-    }
-
 
 def _fallback_one_way_ticket_cost(mode: str, distance_km: float) -> int:
     """估算单人单程公共交通费用。"""
@@ -927,6 +598,109 @@ def _try_railway_plan(
     return _build_plan_from_segments("high_speed_rail", outbound, return_trip, [])
 
 
+def _select_best_google_flight(
+    flights: list[dict[str, Any]],
+    direction: Literal["outbound", "return"],
+) -> dict[str, Any] | None:
+    """从 Google Flights 结果中选最优航班（方向感知时间评分 + 价格）。"""
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for f in flights:
+        if not f.get("flights"):
+            continue
+        print(f"[intercity_tools][TRACE]   Google Flights 航班: {json.dumps(f, ensure_ascii=False)}")
+        first_seg = f["flights"][0]
+        last_seg = f["flights"][-1]
+        dep_time = first_seg.get("departure_time", "")
+        arr_time = last_seg.get("arrival_time", "")
+        time_score = _time_reasonableness_score(dep_time, arr_time, direction)
+        # 直飞加分
+        direct_bonus = 100 if len(f["flights"]) == 1 else 0
+        # 价格：有真实价格加 200 分并轻微偏好低价；无价格重罚 500 分
+        price = f.get("price", 0) or 0
+        if price > 0:
+            price_score = 200 - int(price / 100)  # 有价格 = 基础 200 分 + 低价偏好
+        else:
+            price_score = -500  # 无价格 = 严重惩罚，排到最后
+        total = time_score + direct_bonus + price_score
+        scored.append((total, f))
+
+    if not scored:
+        return None
+
+    scored.sort(key=lambda item: -item[0])
+    best_score, best = scored[0]
+    _debug(f"Google Flights 筛选: best_score={best_score}, "
+           f"price={best.get('price')}, segments={len(best.get('flights', []))}")
+    return best
+
+
+def _normalize_google_flight(
+    flight: dict[str, Any],
+    origin_city: str,
+    destination_city: str,
+    date: str,
+    direction: Literal["outbound", "return"],
+    people_count: int,
+) -> dict[str, Any]:
+    """将 Google Flights 结果归一化为单程跨城交通结构。"""
+    segments = flight.get("flights", [])
+    airlines = flight.get("airlines", [])
+    airline_str = "/".join(airlines) if airlines else "航班"
+    price_per_person = flight.get("price_per_person", 0) or 0
+    people = max(1, int(people_count))
+
+    if segments:
+        first = segments[0]
+        last = segments[-1]
+        departure_place = first["from_airport"]["name"]
+        arrival_place = last["to_airport"]["name"]
+        departure_time = first.get("departure_time", "")
+        arrival_time = last.get("arrival_time", "")
+        duration_minutes = sum(s.get("duration_minutes", 0) for s in segments)
+        service_no = f"{airline_str} {first.get('from_airport', {}).get('code', '')}→{last.get('to_airport', {}).get('code', '')}"
+    else:
+        departure_place = origin_city
+        arrival_place = destination_city
+        departure_time = ""
+        arrival_time = ""
+        duration_minutes = 0
+        service_no = airline_str
+
+    estimated_cost = int(round(price_per_person * people)) if price_per_person > 0 else 0
+
+    route_summary = (
+        f"{service_no}: {departure_place}"
+        f"{' ' + departure_time if departure_time else ''} → {arrival_place}"
+        f"{' ' + arrival_time if arrival_time else ''}"
+    )
+
+    notes = ["数据来源：Google Flights。"]
+    if len(segments) > 1:
+        notes.append(f"经停 {len(segments) - 1} 站")
+
+    return {
+        "direction": direction,
+        "origin": origin_city,
+        "destination": destination_city,
+        "date": date,
+        "mode": "flight",
+        "duration_minutes": duration_minutes,
+        "distance_km": 0,
+        "estimated_cost": estimated_cost,
+        "route_summary": route_summary,
+        "notes": notes,
+        "service_no": service_no,
+        "carrier": airline_str,
+        "departure_place": departure_place,
+        "arrival_place": arrival_place,
+        "departure_time": departure_time or None,
+        "arrival_time": arrival_time or None,
+        "price_per_person": round(price_per_person, 2) if price_per_person > 0 else None,
+        "data_source": "google_flights",
+        "is_estimated": False,
+    }
+
+
 def _try_flight_plan(
     departure_city: str,
     destination_city: str,
@@ -936,23 +710,33 @@ def _try_flight_plan(
     origin_coord: tuple[float, float],
     destination_coord: tuple[float, float],
 ) -> dict[str, Any]:
-    """使用高德公交换乘 API 提取航班往返方案"""
-    outbound_transits = _call_amap_transit_route(origin_coord, destination_coord, departure_city, destination_city)
-    return_transits = _call_amap_transit_route(destination_coord, origin_coord, destination_city, departure_city)
-    outbound_selection = _select_flight_plan(outbound_transits, "outbound")
-    return_selection = _select_flight_plan(return_transits, "return")
-    if not outbound_selection or not return_selection:
-        raise RuntimeError("高德未返回可用航班段。")
+    """使用 Google Flights 查询真实航班往返方案。"""
+    from app.tools.flight_tools import resolve_airport_code, query_flights
 
-    outbound_transit, outbound_flight = outbound_selection
-    return_transit, return_flight = return_selection
-    outbound = _normalize_flight_segment(
-        outbound_transit, outbound_flight,
-        departure_city, destination_city, start_date, "outbound", people_count,
+    _debug(f"Google Flights 查询: {departure_city} → {destination_city}")
+
+    origin_code = resolve_airport_code(departure_city)
+    dest_code = resolve_airport_code(destination_city)
+    _debug(f"机场代码: {departure_city}→{origin_code}, {destination_city}→{dest_code}")
+
+    if not origin_code or not dest_code:
+        raise RuntimeError(f"机场代码解析失败: {departure_city}={origin_code}, {destination_city}={dest_code}")
+
+    outbound_flights = query_flights(origin_code, dest_code, start_date, people_count=people_count)
+    return_flights = query_flights(dest_code, origin_code, end_date, people_count=people_count)
+
+    outbound_best = _select_best_google_flight(outbound_flights, "outbound")
+    return_best = _select_best_google_flight(return_flights, "return")
+    _debug(f"去程选中: {outbound_best is not None}, 返程选中: {return_best is not None}")
+
+    if not outbound_best or not return_best:
+        raise RuntimeError("Google Flights 未返回可用航班。")
+
+    outbound = _normalize_google_flight(
+        outbound_best, departure_city, destination_city, start_date, "outbound", people_count,
     )
-    return_trip = _normalize_flight_segment(
-        return_transit, return_flight,
-        destination_city, departure_city, end_date, "return", people_count,
+    return_trip = _normalize_google_flight(
+        return_best, destination_city, departure_city, end_date, "return", people_count,
     )
     return _build_plan_from_segments("flight", outbound, return_trip, [])
 
