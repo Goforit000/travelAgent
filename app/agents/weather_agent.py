@@ -30,18 +30,6 @@ class WeatherAgent(BaseAgent):
             "负责填充 raw_weather 字段。"
         )
 
-    @property
-    def system_prompt(self) -> str:
-        return ""
-
-    @property
-    def tools(self) -> list:
-        return []
-
-    @property
-    def max_steps(self) -> int:
-        return 1
-
     def run(self, state: TripState) -> dict:
         """
         直接调用 get_weather()，跳过 LLM ReAct 循环

@@ -1,5 +1,7 @@
 """
 Agent 模块 — 多 Agent 协作系统
 
-所有 Agent 继承自 BaseAgent，通过 ReAct 循环自主决策调用工具。
+继承关系：
+  BaseAgent              ← Weather、Transport、Planner（不需要 ReAct 的 Agent）
+    └── ReActAgent       ← POI、Hotel、Budget（需要 ReAct 循环的 Agent）
 """

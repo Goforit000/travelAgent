@@ -3,32 +3,26 @@ LangGraph 工作流组装 — Planner-Centric Pipeline 架构
 
 确定性管道 + 唯一条件回路（预算超限回退修正）
 
-拓扑结构：
+  编排图（StateGraph）
 
-                    START
-                      │
-                      ▼
-               initialize_node
-                      │
-                      ▼
-            data_collection_node
-       (POI + Weather + Hotel + Transport
-                ThreadPoolExecutor 并行)
-                      │
-                      ▼
-               planner_node
-                      │
-                      ▼
-               budget_node
-                      │
-                      │ (add_conditional_edges)
-                      │ workflow_router()
-                      │
-          ┌───────────┴───────────┐
-          ▼                       ▼
-    planner_node            finalize_node
-    (预算修正回路,               │
-     revision_round < 3)        END
+  START
+    │
+    ▼
+  initialize_node          ← 初始化 phase、计数器、清空累积器
+    │
+    ▼
+  data_collection_node     ← 并行执行 4 个 Agent（ThreadPoolExecutor, 4 线程）
+    │                         POI + Weather + Hotel + Transport
+    │                         失败自动重试 1 轮
+    ▼
+  planner_node             ← 单次 LLM：生成完整行程 JSON
+    │                        （若 phase="review" 则进入修订模式）
+    ▼
+  budget_node              ← ReAct：计算预算 & 提出省钱建议
+    │
+    ├── 超预算且 revision_round < 3 → 回到 planner_node（修订循环）
+    │
+    └── 否则 → finalize_node → END
 
 规则：
 1. data_collection_node 内部并行 POI+Weather+Hotel+Transport，完成后直接进 planner

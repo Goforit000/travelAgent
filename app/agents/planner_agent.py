@@ -12,7 +12,6 @@ Planner Agent — 负责综合所有数据，生成完整的结构化旅行计�
 import json
 from datetime import datetime, timedelta
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_core.tools import BaseTool
 from app.agents.base import BaseAgent
 from app.graph.state import TripState
 from app.tools.llm import get_chat_model, PLANNER_MAX_TOKENS, PLANNER_REQUEST_TIMEOUT
@@ -181,14 +180,6 @@ class PlannerAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
         return PLANNER_SYSTEM_PROMPT
-
-    @property
-    def tools(self) -> list[BaseTool]:
-        return []
-
-    @property
-    def max_steps(self) -> int:
-        return 1
 
     @property
     def max_tokens(self) -> int:

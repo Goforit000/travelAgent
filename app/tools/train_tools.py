@@ -1,27 +1,35 @@
 """
-12306 火车票查询工具 — 直接调用 12306 官方 API。
+12306 火车票查询工具 — 直接调用 12306 官方 API + 高铁规划层。
 
-原本通过 MCP HTTP 协议调用 mcp-server-12306，现已将核心逻辑内迁，
-去掉了中间 MCP 协议层，改为在本地直接请求 12306 官网接口。
-
-提供给 intercity_tools 使用的公开函数：
+底层 API：
     search_stations(keyword)     → list[dict]
     query_tickets(from, to, date) → list[dict]
     query_ticket_price(from, to, date, train_code) → dict
     resolve_station_telecode(city) → str | None
+
+高层规划：
+    plan_train(departure_city, destination_city, start_date, end_date, people_count) → dict
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
-import logging
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import httpx
 
 from app.tools.station_service import station_service
+from app.utils.transport_utils import (
+    build_plan_from_segments,
+    create_estimated_fallback,
+    normalize_city,
+    time_reasonableness_score,
+    to_float,
+    to_int,
+)
 from app.utils.date_utils import validate_date_not_past
 
 logger = logging.getLogger(__name__)
@@ -55,19 +63,19 @@ HTTP_HEADERS = {
 }
 
 # 模块首次使用时自动加载车站数据
-_stations_loaded = False
+stations_loaded = False
 
 
-def _init_stations() -> None:
+def init_stations() -> None:
     """懒加载车站数据（从 app/tools/station_name.js）。"""
-    global _stations_loaded
-    if _stations_loaded:
+    global stations_loaded
+    if stations_loaded:
         return
     from app.utils.config import settings
 
     path = settings.station_data_path or None
     station_service.load_stations(path)
-    _stations_loaded = True
+    stations_loaded = True
     logger.info(f"[train_tools] 车站数据已加载: {len(station_service.stations)} 个")
 
 
@@ -75,7 +83,7 @@ def _init_stations() -> None:
 # 辅助函数
 # ═══════════════════════════════════════════════════════════════
 
-def _ensure_telecode(val: str) -> Optional[str]:
+def ensure_telecode(val: str) -> Optional[str]:
     """车站名/三字码 → 三字码（电报码）。"""
     if not val:
         return None
@@ -84,7 +92,7 @@ def _ensure_telecode(val: str) -> Optional[str]:
     return station_service.get_station_code(val)
 
 
-def _parse_ticket_string(ticket_str: str, query: dict) -> Optional[dict]:
+def parse_ticket_string(ticket_str: str, query: dict) -> Optional[dict]:
     """解析 12306 单条车票字符串。"""
     parts = ticket_str.split('|')
     if len(parts) < 35:
@@ -110,7 +118,7 @@ def _parse_ticket_string(ticket_str: str, query: dict) -> Optional[dict]:
     }
 
 
-def _http_client() -> httpx.Client:
+def http_client() -> httpx.Client:
     """创建带默认配置的 httpx 同步客户端。"""
     return httpx.Client(follow_redirects=False, timeout=10, verify=False)
 
@@ -125,7 +133,7 @@ def search_stations(keyword: str) -> list[dict[str, str]]:
 
     返回: [{"name": "北京", "code": "BJP", "pinyin": "beijing", "py_short": "bj", "city": "北京"}, ...]
     """
-    _init_stations()
+    init_stations()
 
     result = station_service.search_stations(keyword, limit=15)
     stations = []
@@ -149,7 +157,7 @@ def resolve_station_telecode(city: str) -> Optional[str]:
     搜索城市对应的车站，优先选主站（不带方位后缀的）。
     例如 "北京" → "BJP"（北京站），而非 "BXP"（北京西站）。
     """
-    _init_stations()
+    init_stations()
 
     stations = search_stations(city)
     if not stations:
@@ -186,7 +194,7 @@ def query_tickets(
     返回: 车次列表，每项含 train_no / from_station_name / to_station_name /
           start_time / arrive_time / duration / seats
     """
-    _init_stations()
+    init_stations()
 
     # 日期校验
     is_valid, error_msg = validate_date_not_past(date)
@@ -195,8 +203,8 @@ def query_tickets(
         return []
 
     # 车站名 → 电报码
-    from_code = _ensure_telecode(from_station)
-    to_code = _ensure_telecode(to_station)
+    from_code = ensure_telecode(from_station)
+    to_code = ensure_telecode(to_station)
     if not from_code or not to_code:
         logger.warning(f"[train_tools] 车站解析失败: {from_station}→{from_code}, {to_station}→{to_code}")
         return []
@@ -210,7 +218,7 @@ def query_tickets(
 
     for attempt in range(max_retries):
         try:
-            with _http_client() as client:
+            with http_client() as client:
                 # 先访问 init 页面获取 cookie
                 client.get(url_init, headers=headers)
 
@@ -246,7 +254,7 @@ def query_tickets(
     # 解析结果
     tickets = []
     for ticket_str in tickets_data:
-        ticket = _parse_ticket_string(ticket_str, {
+        ticket = parse_ticket_string(ticket_str, {
             "from_station": from_station,
             "to_station": to_station,
             "train_date": date,
@@ -315,11 +323,11 @@ def query_ticket_price(
     返回: {"prices": {"二等座": "23.0", "一等座": "45.5", ...}, ...}
           或空 dict（查询失败时）
     """
-    _init_stations()
+    init_stations()
 
     # 车站名 → 电报码
-    from_code = _ensure_telecode(from_station)
-    to_code = _ensure_telecode(to_station)
+    from_code = ensure_telecode(from_station)
+    to_code = ensure_telecode(to_station)
     if not from_code or not to_code:
         logger.warning(f"[train_tools] 票价查询车站解析失败: {from_station}→{from_code}, {to_station}→{to_code}")
         return {}
@@ -340,7 +348,7 @@ def query_ticket_price(
 
     for attempt in range(max_retries):
         try:
-            with _http_client() as client:
+            with http_client() as client:
                 client.get(url_init, headers=headers)
                 resp = client.get(url_price, headers=headers, params=params)
 
@@ -426,4 +434,222 @@ def list_tools() -> list[dict[str, Any]]:
         {"name": "query-ticket-price", "description": "查询火车票价信息"},
         {"name": "search-stations", "description": "智能车站搜索"},
     ]
+
+
+# ═══════════════════════════════════════════════════════════════
+# 高铁规划层（从 intercity_tools 迁入）
+# ═══════════════════════════════════════════════════════════════
+
+def is_high_speed_train(ticket: dict[str, Any]) -> bool:
+    """判断是否为高铁/动车/城际（G/D/C 字头）。"""
+    train_no = str(ticket.get("train_no", "") or "")
+    return bool(re.match(r"^[GDC]", train_no, re.IGNORECASE))
+
+
+def train_duration_minutes(ticket: dict[str, Any]) -> int:
+    """解析 12306 车票持续时间（格式可能是 HH:MM 或分钟数）。"""
+    duration = ticket.get("duration", "")
+    if isinstance(duration, (int, float)):
+        return int(duration)
+    if isinstance(duration, str) and ":" in duration:
+        parts = duration.split(":")
+        return int(parts[0]) * 60 + int(parts[1])
+    return to_int(duration, 0)
+
+
+def train_second_class_price(source: dict[str, Any]) -> float:
+    # 先尝试嵌套 prices 字段
+    prices = source.get("prices", {})
+    if isinstance(prices, dict):
+        for key, val in prices.items():
+            if "二等" in key or "second" in key.lower() or "edz" in key.lower():
+                p = to_float(val)
+                if p > 0:
+                    return p
+        for val in prices.values():
+            p = to_float(val)
+            if p > 0:
+                return p
+    # 顶层直接查找
+    for key in ("second_class_price", "price_2nd", "二等座", "second_price",
+                "edz_price", "EDZ", "second_seat_price", "ZE", "ze_price"):
+        val = source.get(key)
+        if val is not None and to_float(val) > 0:
+            return to_float(val)
+    # 遍历顶层字段
+    for key, val in source.items():
+        if isinstance(val, (int, float)) and val > 0:
+            key_lower = key.lower()
+            if "二等" in key or "second" in key_lower or "edz" in key_lower:
+                return to_float(val)
+    # 兜底
+    for key in ("price", "ticket_price", "total_price"):
+        val = source.get(key)
+        if val is not None and to_float(val) > 0:
+            return to_float(val)
+    return 0.0
+
+def select_train(
+    tickets: list[dict[str, Any]],
+    direction: Literal["outbound", "return"],
+) -> dict[str, Any] | None:
+    """从 12306 车票列表中选出最合适的高铁/动车（方向感知时间评分）。"""
+    high_speed = [t for t in tickets if is_high_speed_train(t)]
+    print(f"[train_tools] _select_train direction={direction}, "
+          f"总车次={len(tickets)}, 高铁/动车={len(high_speed)}")
+    if tickets:
+        print(f"[train_tools]   第一条车次全部字段: {json.dumps(tickets[0], ensure_ascii=False)}")
+
+    if not high_speed:
+        return None
+
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for ticket in high_speed:
+        dep_time = str(ticket.get("start_time", "") or "")
+        arr_time = str(ticket.get("arrive_time", "") or "")
+        time_score = time_reasonableness_score(dep_time, arr_time, direction)
+        duration = train_duration_minutes(ticket)
+        train_no = ticket.get("train_no", "")
+        prefix = train_no[0].upper() if train_no else ""
+        type_bonus = 30 if prefix == "G" else (20 if prefix == "D" else (10 if prefix == "C" else 0))
+        total = time_score + type_bonus
+        scored.append((total, ticket))
+        print(f"[train_tools]   车次: {train_no}, dep={dep_time}, arr={arr_time}, "
+              f"duration={duration}min, type_bonus={type_bonus}, time_score={time_score}, "
+              f"total={total}, price={train_second_class_price(ticket)}")
+
+    scored.sort(key=lambda item: (-item[0], train_duration_minutes(item[1])))
+    best_score, best_ticket = scored[0]
+    print(f"[train_tools] 最高分车次: {best_ticket.get('train_no')}, "
+          f"score={best_score}, {'✅ 选中' if best_score >= -50 else '❌ 分数过低'}")
+
+    if best_score < -200:
+        return None
+    return best_ticket
+
+
+def normalize_train_result(
+    ticket: dict[str, Any],
+    origin_city: str,
+    destination_city: str,
+    date: str,
+    direction: Literal["outbound", "return"],
+    people_count: int,
+    price_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    train_no = str(ticket.get("train_no", "") or ticket.get("name", "") or "").strip()
+    departure_station = str(ticket.get("from_station_name", "") or ticket.get("start_station", "") or origin_city)
+    arrival_station = str(ticket.get("to_station_name", "") or ticket.get("end_station", "") or destination_city)
+    departure_time = str(ticket.get("start_time", "") or "")
+    arrival_time = str(ticket.get("arrive_time", "") or "")
+    duration_minutes = train_duration_minutes(ticket)
+    price_source = price_info if price_info else ticket
+    price_per_person = train_second_class_price(price_source)
+    estimated_cost = int(round(price_per_person * max(1, people_count))) if price_per_person > 0 else 0
+
+    route_summary = (
+        f"{train_no or '高铁/动车'}: {departure_station}"
+        f"{' ' + departure_time if departure_time else ''} → {arrival_station}"
+        f"{' ' + arrival_time if arrival_time else ''}"
+    )
+
+    return {
+        "direction": direction,
+        "origin": origin_city,
+        "destination": destination_city,
+        "date": date,
+        "mode": "high_speed_rail",
+        "duration_minutes": duration_minutes,
+        "distance_km": 0,
+        "estimated_cost": estimated_cost,
+        "route_summary": route_summary,
+        "notes": ["数据来源：12306 官方实时车次。"],
+        "service_no": train_no or None,
+        "carrier": "铁路",
+        "departure_place": departure_station,
+        "arrival_place": arrival_station,
+        "departure_time": departure_time or None,
+        "arrival_time": arrival_time or None,
+        "price_per_person": round(price_per_person, 2) if price_per_person > 0 else None,
+        "data_source": "12306",
+        "is_estimated": False,
+    }
+
+
+def plan_train(
+    departure_city: str,
+    destination_city: str,
+    start_date: str,
+    end_date: str,
+    people_count: int,
+) -> dict[str, Any]:
+    """
+    生成高铁/动车往返方案（基于 12306 实时数据）。
+
+    参数：
+        departure_city: 出发城市
+        destination_city: 目的城市
+        start_date: 出发日期 YYYY-MM-DD
+        end_date: 返程日期 YYYY-MM-DD
+        people_count: 人数
+
+    返回：统一跨城交通方案 dict。
+    """
+    origin_name = normalize_city(departure_city)
+    dest_name = normalize_city(destination_city)
+    people = max(1, int(people_count or 1))
+
+    print(f"[train_tools] plan_train(12306) 开始: {origin_name} → {dest_name}")
+
+    from_code = resolve_station_telecode(origin_name)
+    to_code = resolve_station_telecode(dest_name)
+    print(f"[train_tools] 车站电报码: {origin_name}→{from_code}, {dest_name}→{to_code}")
+
+    if not from_code or not to_code:
+        return create_estimated_fallback(
+            departure_city=origin_name,
+            destination_city=dest_name,
+            start_date=start_date,
+            end_date=end_date,
+            people_count=people,
+            mode="high_speed_rail",
+            warnings=[f"12306 车站解析失败: {origin_name}={from_code}, {dest_name}={to_code}"],
+        )
+
+    try:
+        outbound_tickets = query_tickets(from_code, to_code, start_date)
+        return_tickets = query_tickets(to_code, from_code, end_date)
+
+        outbound_train = select_train(outbound_tickets, "outbound")
+        return_train = select_train(return_tickets, "return")
+        print(f"[train_tools] 去程选中: {outbound_train is not None}, 返程选中: {return_train is not None}")
+
+        if not outbound_train or not return_train:
+            raise RuntimeError("12306 未返回可用高铁/动车车次。")
+
+        outbound_code = str(outbound_train.get("train_no", "") or "")
+        return_code = str(return_train.get("train_no", "") or "")
+        outbound_price = query_ticket_price(from_code, to_code, start_date, outbound_code) if outbound_code else {}
+        return_price = query_ticket_price(to_code, from_code, end_date, return_code) if return_code else {}
+        print(f"[train_tools] 票价: 去程={outbound_price}, 返程={return_price}")
+
+        outbound = normalize_train_result(
+            outbound_train, origin_name, dest_name, start_date, "outbound", people, outbound_price,
+        )
+        return_trip = normalize_train_result(
+            return_train, dest_name, origin_name, end_date, "return", people, return_price,
+        )
+        return build_plan_from_segments("high_speed_rail", outbound, return_trip, [])
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return create_estimated_fallback(
+            departure_city=origin_name,
+            destination_city=dest_name,
+            start_date=start_date,
+            end_date=end_date,
+            people_count=people,
+            mode="high_speed_rail",
+            warnings=[f"12306 未返回可用高铁/动车车次，已使用估算。原因：{exc}"],
+        )
 

@@ -1,10 +1,13 @@
 """
-Google Flights 航班查询工具 — 封装 fast_flights 库。
+Google Flights 航班查询工具 — 封装 fast_flights 库 + 航班规划层。
 
-提供：
+底层 API：
     search_airports(city)     → list[dict]  城市名→机场列表
     resolve_airport_code(city) → str | None  城市→首选机场三字码
     query_flights(from_code, to_code, date, **) → list[dict]  查航班
+
+高层规划：
+    plan_flight(departure_city, destination_city, start_date, end_date, people_count) → dict
 
 数据来源：Google Flights（通过 fast_flights 抓取），无需 API Key。
 """
@@ -12,9 +15,17 @@ Google Flights 航班查询工具 — 封装 fast_flights 库。
 from __future__ import annotations
 
 import csv
+import json
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+
+from app.utils.transport_utils import (
+    build_plan_from_segments,
+    create_estimated_fallback,
+    normalize_city,
+    time_reasonableness_score,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 
 # 常用城市中文名 → 首选机场三字码
-_CITY_CN_TO_CODE: dict[str, str] = {
+CITY_CN_TO_CODE: dict[str, str] = {
     "北京": "PEK",
     "上海": "PVG",
     "广州": "CAN",
@@ -97,7 +108,7 @@ _CITY_CN_TO_CODE: dict[str, str] = {
 }
 
 # 英文城市名 → 首选机场三字码（非中国城市直接映射）
-_CITY_EN_TO_CODE: dict[str, str] = {
+CITY_EN_TO_CODE: dict[str, str] = {
     "tokyo": "NRT", "osaka": "KIX", "seoul": "ICN",
     "bangkok": "BKK", "singapore": "SIN", "kuala lumpur": "KUL",
     "london": "LHR", "paris": "CDG", "new york": "JFK",
@@ -113,7 +124,7 @@ _CITY_EN_TO_CODE: dict[str, str] = {
 }
 
 # 城市英文名 → 中文名（用于 airports.csv 的 name 字段反向匹配）
-_CITY_EN_TO_CN: dict[str, str] = {
+CITY_EN_TO_CN: dict[str, str] = {
     "beijing": "北京", "shanghai": "上海", "guangzhou": "广州",
     "shenzhen": "深圳", "chengdu": "成都", "chongqing": "重庆",
     "hangzhou": "杭州", "wuhan": "武汉", "xian": "西安",
@@ -130,20 +141,20 @@ _CITY_EN_TO_CN: dict[str, str] = {
     "zhuhai": "珠海", "guilin": "桂林", "lijiang": "丽江",
 }
 
-_airports_loaded = False
-_airports_by_code: dict[str, dict] = {}
-_airports_list: list[dict] = []
+airports_loaded = False
+airports_by_code: dict[str, dict] = {}
+airports_list: list[dict] = []
 
 
-def _load_airports() -> None:
-    global _airports_loaded, _airports_by_code, _airports_list
-    if _airports_loaded:
+def load_airports() -> None:
+    global airports_loaded, airports_by_code, airports_list
+    if airports_loaded:
         return
 
     csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "airports.csv")
     if not os.path.exists(csv_path):
         logger.warning(f"[flight_tools] airports.csv 不存在: {csv_path}")
-        _airports_loaded = True
+        airports_loaded = True
         return
 
     with open(csv_path, "r", encoding="utf-8") as f:
@@ -159,20 +170,20 @@ def _load_airports() -> None:
                 "country": (row.get("country_id") or "").strip(),
                 "location": (row.get("location") or "").strip(),
             }
-            _airports_by_code[code] = info
-            _airports_list.append(info)
+            airports_by_code[code] = info
+            airports_list.append(info)
 
-    _airports_loaded = True
-    logger.info(f"[flight_tools] 已加载 {len(_airports_by_code)} 个机场")
+    airports_loaded = True
+    logger.info(f"[flight_tools] 已加载 {len(airports_by_code)} 个机场")
 
 
-def _match_airport_name(name_en: str, keyword_lower: str) -> bool:
+def match_airport_name(name_en: str, keyword_lower: str) -> bool:
     """检查机场英文名是否匹配关键词（英/中）。"""
     name_lower = name_en.lower()
     if keyword_lower in name_lower:
         return True
     # 英文名 → 中文名 → 匹配
-    for en_city, cn_city in _CITY_EN_TO_CN.items():
+    for en_city, cn_city in CITY_EN_TO_CN.items():
         if cn_city == keyword_lower and en_city in name_lower:
             return True
     return False
@@ -189,18 +200,18 @@ def search_airports(keyword: str) -> list[dict[str, str]]:
     支持中文城市名（如"北京"、"上海"）和英文名（如"Taipei"、直接三字码）。
     返回机场列表，每项含 code / name / city / country。
     """
-    _load_airports()
+    load_airports()
 
     keyword_lower = keyword.strip().lower()
     results: list[dict] = []
 
     # 先直接匹配三字码
-    if keyword_lower.upper() in _airports_by_code:
-        results.append(_airports_by_code[keyword_lower.upper()])
+    if keyword_lower.upper() in airports_by_code:
+        results.append(airports_by_code[keyword_lower.upper()])
 
     # 匹配机场英文名
-    for info in _airports_list:
-        if _match_airport_name(info["name"], keyword_lower):
+    for info in airports_list:
+        if match_airport_name(info["name"], keyword_lower):
             results.append(info)
 
     # 去重，优先中国机场
@@ -220,7 +231,7 @@ def search_airports(keyword: str) -> list[dict[str, str]]:
     return unique
 
 
-def _fmt_time(t) -> str:
+def fmt_time(t) -> str:
     """从 tuple/list 安全提取 HH:MM 时间字符串，缺失时返回空字符串。"""
     if not t or len(t) < 2:
         return ""
@@ -242,8 +253,8 @@ def resolve_airport_code(city: str) -> Optional[str]:
 
     # 直接是三字码
     if city_clean.isalpha() and city_clean.isupper() and len(city_clean) == 3:
-        _load_airports()
-        if city_clean in _airports_by_code:
+        load_airports()
+        if city_clean in airports_by_code:
             return city_clean
 
     # 去掉"市"后缀
@@ -251,23 +262,23 @@ def resolve_airport_code(city: str) -> Optional[str]:
         city_clean = city_clean[:-1]
 
     # 查中文映射表
-    if city_clean in _CITY_CN_TO_CODE:
-        code = _CITY_CN_TO_CODE[city_clean]
+    if city_clean in CITY_CN_TO_CODE:
+        code = CITY_CN_TO_CODE[city_clean]
         logger.debug(f"[flight_tools] 机场匹配(映射表): {city} → {code}")
         return code
 
     # 查英文映射表
     city_lower = city_clean.lower()
-    if city_lower in _CITY_EN_TO_CODE:
-        code = _CITY_EN_TO_CODE[city_lower]
+    if city_lower in CITY_EN_TO_CODE:
+        code = CITY_EN_TO_CODE[city_lower]
         logger.debug(f"[flight_tools] 机场匹配(英→码): {city} → {code}")
         return code
 
     # 英文名反查中文再查映射
-    if city_lower in _CITY_EN_TO_CN:
-        cn = _CITY_EN_TO_CN[city_lower]
-        if cn in _CITY_CN_TO_CODE:
-            code = _CITY_CN_TO_CODE[cn]
+    if city_lower in CITY_EN_TO_CN:
+        cn = CITY_EN_TO_CN[city_lower]
+        if cn in CITY_CN_TO_CODE:
+            code = CITY_CN_TO_CODE[cn]
             logger.debug(f"[flight_tools] 机场匹配(英→中): {city} → {code}")
             return code
 
@@ -331,7 +342,7 @@ def query_flights(
         }, ...]
         carbon_emission: int (grams)
     """
-    _load_airports()
+    load_airports()
 
     try:
         from app.tools.fast_flights import (
@@ -375,8 +386,8 @@ def query_flights(
         segments = []
         for sf in flights_obj.flights:
             # 安全提取 HH:MM 时间字符串
-            dep_time = _fmt_time(sf.departure.time)
-            arr_time = _fmt_time(sf.arrival.time)
+            dep_time = fmt_time(sf.departure.time)
+            arr_time = fmt_time(sf.arrival.time)
 
             segments.append({
                 "from_airport": {
@@ -412,3 +423,181 @@ def query_flights(
                      f"segments={len(first['flights'])}")
 
     return flights_list
+
+
+# ═══════════════════════════════════════════════════════════════
+# 航班规划层（从 intercity_tools 迁入）
+# ═══════════════════════════════════════════════════════════════
+
+def select_best_google_flight(
+    flights: list[dict[str, Any]],
+    direction: Literal["outbound", "return"],
+) -> dict[str, Any] | None:
+    """从 Google Flights 结果中选最优航班（方向感知时间评分 + 价格）。"""
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for f in flights:
+        if not f.get("flights"):
+            continue
+        print(f"[intercity_tools][TRACE]   Google Flights 航班: {json.dumps(f, ensure_ascii=False)}")
+        first_seg = f["flights"][0]
+        last_seg = f["flights"][-1]
+        dep_time = first_seg.get("departure_time", "")
+        arr_time = last_seg.get("arrival_time", "")
+        time_score = time_reasonableness_score(dep_time, arr_time, direction)
+        # 直飞加分
+        direct_bonus = 100 if len(f["flights"]) == 1 else 0
+        # 价格：有真实价格加 200 分并轻微偏好低价；无价格重罚 500 分
+        price = f.get("price", 0) or 0
+        if price > 0:
+            price_score = 200 - int(price / 100)  # 有价格 = 基础 200 分 + 低价偏好
+        else:
+            price_score = -500  # 无价格 = 严重惩罚，排到最后
+        total = time_score + direct_bonus + price_score
+        scored.append((total, f))
+
+    if not scored:
+        return None
+
+    scored.sort(key=lambda item: -item[0])
+    best_score, best = scored[0]
+    print(f"[flight_tools] Google Flights 筛选: best_score={best_score}, "
+          f"price={best.get('price')}, segments={len(best.get('flights', []))}")
+    return best
+
+
+def normalize_google_flight(
+    flight: dict[str, Any],
+    origin_city: str,
+    destination_city: str,
+    date: str,
+    direction: Literal["outbound", "return"],
+    people_count: int,
+) -> dict[str, Any]:
+    segments = flight.get("flights", [])
+    airlines = flight.get("airlines", [])
+    airline_str = "/".join(airlines) if airlines else "航班"
+    price_per_person = flight.get("price_per_person", 0) or 0
+    people = max(1, int(people_count))
+
+    if segments:
+        first = segments[0]
+        last = segments[-1]
+        departure_place = first["from_airport"]["name"]
+        arrival_place = last["to_airport"]["name"]
+        departure_time = first.get("departure_time", "")
+        arrival_time = last.get("arrival_time", "")
+        duration_minutes = sum(s.get("duration_minutes", 0) for s in segments)
+        service_no = f"{airline_str} {first.get('from_airport', {}).get('code', '')}→{last.get('to_airport', {}).get('code', '')}"
+    else:
+        departure_place = origin_city
+        arrival_place = destination_city
+        departure_time = ""
+        arrival_time = ""
+        duration_minutes = 0
+        service_no = airline_str
+
+    estimated_cost = int(round(price_per_person * people)) if price_per_person > 0 else 0
+
+    route_summary = (
+        f"{service_no}: {departure_place}"
+        f"{' ' + departure_time if departure_time else ''} → {arrival_place}"
+        f"{' ' + arrival_time if arrival_time else ''}"
+    )
+
+    notes = ["数据来源：Google Flights。"]
+    if len(segments) > 1:
+        notes.append(f"经停 {len(segments) - 1} 站")
+
+    return {
+        "direction": direction,
+        "origin": origin_city,
+        "destination": destination_city,
+        "date": date,
+        "mode": "flight",
+        "duration_minutes": duration_minutes,
+        "distance_km": 0,
+        "estimated_cost": estimated_cost,
+        "route_summary": route_summary,
+        "notes": notes,
+        "service_no": service_no,
+        "carrier": airline_str,
+        "departure_place": departure_place,
+        "arrival_place": arrival_place,
+        "departure_time": departure_time or None,
+        "arrival_time": arrival_time or None,
+        "price_per_person": round(price_per_person, 2) if price_per_person > 0 else None,
+        "data_source": "google_flights",
+        "is_estimated": False,
+    }
+
+
+def plan_flight(
+    departure_city: str,
+    destination_city: str,
+    start_date: str,
+    end_date: str,
+    people_count: int,
+) -> dict[str, Any]:
+    """
+    生成航班往返方案（基于 Google Flights 实时数据）。
+
+    参数：
+        departure_city: 出发城市
+        destination_city: 目的城市
+        start_date: 出发日期 YYYY-MM-DD
+        end_date: 返程日期 YYYY-MM-DD
+        people_count: 人数
+
+    返回：统一跨城交通方案 dict。
+    """
+    origin_name = normalize_city(departure_city)
+    dest_name = normalize_city(destination_city)
+    people = max(1, int(people_count or 1))
+
+    print(f"[flight_tools] plan_flight(Google Flights): {origin_name} → {dest_name}")
+
+    origin_code = resolve_airport_code(origin_name)
+    dest_code = resolve_airport_code(dest_name)
+    print(f"[flight_tools] 机场代码: {origin_name}→{origin_code}, {dest_name}→{dest_code}")
+
+    if not origin_code or not dest_code:
+        return create_estimated_fallback(
+            departure_city=origin_name,
+            destination_city=dest_name,
+            start_date=start_date,
+            end_date=end_date,
+            people_count=people,
+            mode="flight",
+            warnings=[f"机场代码解析失败: {origin_name}={origin_code}, {dest_name}={dest_code}"],
+        )
+
+    try:
+        outbound_flights = query_flights(origin_code, dest_code, start_date, people_count=people)
+        return_flights = query_flights(dest_code, origin_code, end_date, people_count=people)
+
+        outbound_best = select_best_google_flight(outbound_flights, "outbound")
+        return_best = select_best_google_flight(return_flights, "return")
+        print(f"[flight_tools] 去程选中: {outbound_best is not None}, 返程选中: {return_best is not None}")
+
+        if not outbound_best or not return_best:
+            raise RuntimeError("Google Flights 未返回可用航班。")
+
+        outbound = normalize_google_flight(
+            outbound_best, origin_name, dest_name, start_date, "outbound", people,
+        )
+        return_trip = normalize_google_flight(
+            return_best, dest_name, origin_name, end_date, "return", people,
+        )
+        return build_plan_from_segments("flight", outbound, return_trip, [])
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return create_estimated_fallback(
+            departure_city=origin_name,
+            destination_city=dest_name,
+            start_date=start_date,
+            end_date=end_date,
+            people_count=people,
+            mode="flight",
+            warnings=[f"Google Flights 未返回可用航班，已使用估算。原因：{exc}"],
+        )

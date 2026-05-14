@@ -17,13 +17,13 @@ Budget Agent — 负责计算旅行计划预算，超限时生成削减建议（
 
 import json
 from langchain_core.tools import BaseTool
-from app.agents.base import BaseAgent
+from app.agents.base import ReActAgent
 from app.graph.state import TripState
 from app.tools.budget_tools import calculate_budget_tool, suggest_savings_tool
 from app.tools.llm import BUDGET_MAX_TOKENS
 
 
-class BudgetAgent(BaseAgent):
+class BudgetAgent(ReActAgent):
     @property
     def name(self) -> str:
         return "budget_agent"

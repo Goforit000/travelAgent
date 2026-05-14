@@ -13,12 +13,12 @@ POI Agent — 负责智能搜索目的地的景点信息
 
 import json
 from langchain_core.tools import BaseTool
-from app.agents.base import BaseAgent
+from app.agents.base import ReActAgent
 from app.graph.state import TripState
 from app.tools.amap import search_attractions_tool
 
 
-class POIAgent(BaseAgent):
+class POIAgent(ReActAgent):
 
     @property
     def name(self) -> str:

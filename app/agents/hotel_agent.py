@@ -11,12 +11,12 @@ Hotel Agent — 负责智能搜索和推荐目的地酒店
 
 import json
 from langchain_core.tools import BaseTool
-from app.agents.base import BaseAgent
+from app.agents.base import ReActAgent
 from app.graph.state import TripState
 from app.tools.amap import search_hotels_tool
 
 
-class HotelAgent(BaseAgent):
+class HotelAgent(ReActAgent):
 
     @property
     def name(self) -> str:
