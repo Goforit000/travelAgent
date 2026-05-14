@@ -24,10 +24,11 @@ router = APIRouter(prefix="/api", tags=["旅行规划"])
 # 节点名称 → 用户可见的 Agent 名称 映射
 NODE_TO_AGENT_NAME: dict[str, str] = {
     "initialize_node": "初始化",
-    "data_collection_node": "数据收集 (景点+天气+酒店)",
+    "data_collection_node": "数据收集 (景点+天气+酒店+往返交通)",
     "poi_node": "景点搜索",
     "weather_node": "天气查询",
     "hotel_node": "酒店推荐",
+    "transport_node": "往返交通",
     "planner_node": "行程规划",
     "budget_node": "预算计算",
     "finalize_node": "完成处理",
@@ -155,6 +156,7 @@ async def plan_trip(request: TripRequest):
             "raw_attractions": [],
             "raw_weather": [],
             "raw_hotels": [],
+            "raw_intercity_transport": {},
             "raw_plan_text": "",
             "trip_plan": None,
             "attraction_photos": {},
@@ -204,6 +206,7 @@ async def plan_trip_stream(request: TripRequest):
         "raw_attractions": [],
         "raw_weather": [],
         "raw_hotels": [],
+        "raw_intercity_transport": {},
         "raw_plan_text": "",
         "trip_plan": None,
         "attraction_photos": {},

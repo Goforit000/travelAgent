@@ -11,6 +11,7 @@
 - query_weather_tool      : 查询天气
 """
 import json
+from typing import Any
 
 import httpx
 from langchain_core.tools import tool
@@ -18,6 +19,70 @@ from app.utils.config import settings
 
 # 高德地图 Web API 的基础地址
 AMAP_BASE_URL = "https://restapi.amap.com/v3"
+
+def amap_get(url: str, params: dict[str, Any], timeout: int = 10) -> dict[str, Any]:
+    """
+    统一调用高德 Web 服务接口。
+    参数：
+        url: 高德接口地址。
+        params: 请求参数，函数会自动补充 key 和 output=json。
+        timeout: 请求超时时间，单位秒。
+    返回：
+        高德返回的 JSON 字典。
+    异常：
+        当 HTTP 请求失败或高德返回 status != 1 时抛出异常。
+    """
+    request_params = {
+        "key": settings.amap_api_key,
+        "output": "json",
+        **params,
+    }
+    response = httpx.get(url, params=request_params, timeout=timeout)
+    response.raise_for_status()
+    data = response.json()
+    if data.get("status") != "1":
+        info = data.get("info") or data.get("infocode") or "unknown error"
+        raise RuntimeError(f"高德接口调用失败: {info}")
+    return data
+
+def geocode_city(city: str) -> tuple[float, float] | None:
+    """
+    将城市名称解析为高德经纬度。
+    参数：
+        city: 城市名称，例如“沈阳”“北京”。
+    返回：
+        解析成功时返回 (longitude, latitude)，失败时返回 None。
+    """
+    try:
+        data = amap_get(
+            f"{AMAP_BASE_URL}/geocode/geo",
+            params={"address": city},
+            timeout=8,
+        )
+        geocodes = data.get("geocodes", [])
+        if not geocodes:
+            return None
+
+        location = geocodes[0].get("location", "")
+        if "," not in location:
+            return None
+
+        lng, lat = location.split(",", 1)
+        return float(lng), float(lat)
+    except Exception as exc:
+        print(f"高德城市地理编码失败: city={city}, error={exc}")
+        return None
+
+
+def format_amap_point(point: tuple[float, float]) -> str:
+    """
+    将经纬度元组格式化为高德路径规划接口需要的字符串。
+    参数：
+        point: (longitude, latitude) 经纬度元组。
+    返回：
+        形如 "116.397428,39.90923" 的字符串。
+    """
+    return f"{point[0]:.6f},{point[1]:.6f}"
 
 
 # ============================================================
@@ -44,24 +109,16 @@ def search_pois(
         调用失败返回空列表（不抛异常，让上层决定如何处理）
     """
     try:
-        resp = httpx.get(
+        data = amap_get(
             f"{AMAP_BASE_URL}/place/text",
             params={
-                "key": settings.amap_api_key,
                 "keywords": keywords,
                 "city": city,
                 "citylimit": str(citylimit).lower(),
-                "output": "json",
                 "offset": min(offset, 20),
             },
             timeout=10,
         )
-        resp.raise_for_status()
-        data = resp.json()
-
-        if data.get("status") != "1":
-            print(f"⚠️ 高德POI搜索失败: {data.get('info', 'unknown error')}")
-            return []
 
         pois = []
         for item in data.get("pois", []):
@@ -100,7 +157,7 @@ def get_weather(city: str) -> list[dict]:
         如果失败返回空列表
     """
     try:
-        resp = httpx.get(
+        data = amap_get(
             f"{AMAP_BASE_URL}/weather/weatherInfo",
             params={
                 "key": settings.amap_api_key,
@@ -110,9 +167,6 @@ def get_weather(city: str) -> list[dict]:
             },
             timeout=10,
         )
-        resp.raise_for_status()
-        data = resp.json()
-
         if data.get("status") != "1":
             print(f"⚠️ 高德天气查询失败: {data.get('info', 'unknown error')}")
             return []

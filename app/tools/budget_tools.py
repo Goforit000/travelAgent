@@ -33,23 +33,26 @@ def calculate_budget_tool(
         transport_cost_per_day: 如果行程中没有指定交通费用，使用此参数作为交通估算日费用。
                                 非自驾表示每人每天费用；自驾表示每辆车每天费用。
         people_count: 出行人数。门票和餐饮按人数乘；酒店按每 2 人一间房估算。
-        transportation: 用户选择的交通方式。Planner 提供的 budget.total_transportation 表示全程交通单价：
+        transportation: 用户选择的目的地城市内交通方式。Planner 提供的 budget.total_transportation 表示市内全程交通单价：
                         非自驾为每人这些天费用；自驾为每辆车这些天费用。
                         缺失时使用 transport_cost_per_day * travel_days 估算对应的全程交通单价。
+                        intercity_transport.total_cost 表示出发地到目的地的往返交通团队总费用。
 
     Returns:
         JSON 字符串，包含详细预算明细：
         - total_attractions: 门票总费用
         - total_hotels: 酒店总费用
         - total_meals: 餐饮总费用
-        - total_transportation: 交通总费用
+        - total_transportation: 目的地城市内交通总费用
+        - total_intercity_transport: 出发地到目的地往返交通总费用
         - total: 总费用
         - breakdown: 逐日明细列表
         - warnings: 预算异常警告列表
     """
     defaults = {
         "total_attractions": 0, "total_hotels": 0,
-        "total_meals": 0, "total_transportation": 0, "total": 0,
+        "total_meals": 0, "total_transportation": 0,
+        "total_intercity_transport": 0, "total": 0,
     }
 
     # 提取 JSON
@@ -201,7 +204,7 @@ def calculate_budget_tool(
             "message": f"未提供酒店费用，按 {hotel_cost_per_night} 元/间/晚 × {travel_days} 晚 × {rooms} 间估算",
         })
 
-    # 优先用 Planner 提供的全程交通单价，缺失时才用参数估算。
+    # 优先用 Planner 提供的目的地城市内全程交通单价，缺失时才用参数估算。
     # 约定：
     # - 非自驾：plan.budget.total_transportation = 每人这些天费用；
     # - 自驾：plan.budget.total_transportation = 每辆车这些天费用；
@@ -236,7 +239,19 @@ def calculate_budget_tool(
             "message": transport_message,
         })
 
-    total = total_attractions + total_hotels + total_meals + total_transportation
+    total_intercity_transport = 0
+    intercity_transport = plan.get("intercity_transport")
+    if isinstance(intercity_transport, dict):
+        intercity_cost = intercity_transport.get("total_cost", 0)
+        if isinstance(intercity_cost, (int, float)) and intercity_cost > 0:
+            total_intercity_transport = int(intercity_cost)
+        elif intercity_transport.get("outbound") or intercity_transport.get("return_trip"):
+            warnings.append({
+                "type": "intercity_transport_missing_cost",
+                "message": "已提供跨城往返交通结构，但 total_cost 缺失或为 0，请确认往返交通费用。",
+            })
+
+    total = total_attractions + total_hotels + total_meals + total_transportation + total_intercity_transport
 
     # 异常检测
     if total_attractions == 0:
@@ -255,6 +270,7 @@ def calculate_budget_tool(
         "total_hotels": total_hotels,
         "total_meals": total_meals,
         "total_transportation": total_transportation,
+        "total_intercity_transport": total_intercity_transport,
         "total": total,
         "people_count": people_count,
         "rooms": rooms,
@@ -291,7 +307,7 @@ def suggest_savings_tool(
     Args:
         current_budget_json: 预算明细 JSON 字符串（通常来自 calculate_budget_tool 的输出）。
                              必须包含 total_attractions / total_hotels / total_meals /
-                             total_transportation / total 字段。
+                             total_transportation / total_intercity_transport / total 字段。
         target_budget: 用户的目标预算上限（元），为 0 表示无上限约束。
         travel_days: 旅行天数，用于计算日均费用。
         people_count: 出行人数，用于在削减建议中保留团队规模信息。
@@ -348,6 +364,7 @@ def suggest_savings_tool(
     total_hotels = budget.get("total_hotels", 0)
     total_meals = budget.get("total_meals", 0)
     total_transportation = budget.get("total_transportation", 0)
+    total_intercity_transport = budget.get("total_intercity_transport", 0)
 
     # 按金额从高到低排序，优先削减占比最大的类别
     categories = [
@@ -355,6 +372,7 @@ def suggest_savings_tool(
         ("attractions", total_attractions, "景点门票"),
         ("meals", total_meals, "餐饮费用"),
         ("transportation", total_transportation, "交通费用"),
+        ("intercity_transportation", total_intercity_transport, "往返交通"),
     ]
     categories.sort(key=lambda x: x[1], reverse=True)
 
@@ -435,6 +453,19 @@ def suggest_savings_tool(
             })
             remaining_overshoot -= actual_saving
             adjusted_total -= actual_saving
+
+        elif cat_key == "intercity_transportation":
+            actual_saving = 0
+            suggestions.append({
+                "category": "往返交通",
+                "current": cat_amount,
+                "suggested": cat_amount,
+                "saving": 0,
+                "description": (
+                    "往返交通方式由用户固定选择，Planner 不应自动改成其他方式。"
+                    "如果超支主要来自往返交通，建议用户回到表单手动调整交通方式或提高预算。"
+                ),
+            })
 
     return json.dumps({
         "current_total": current_total,

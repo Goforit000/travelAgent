@@ -12,7 +12,7 @@ LangGraph 工作流组装 — Planner-Centric Pipeline 架构
                       │
                       ▼
             data_collection_node
-           (POI + Weather + Hotel
+       (POI + Weather + Hotel + Transport
                 ThreadPoolExecutor 并行)
                       │
                       ▼
@@ -31,7 +31,7 @@ LangGraph 工作流组装 — Planner-Centric Pipeline 架构
      revision_round < 3)        END
 
 规则：
-1. data_collection_node 内部并行 POI+Weather+Hotel，完成后直接进 planner
+1. data_collection_node 内部并行 POI+Weather+Hotel+Transport，完成后直接进 planner
 2. planner → budget 链式执行
 3. budget → workflow_router 硬编码条件路由（无 LLM）
 4. finalize → END
@@ -92,7 +92,7 @@ def get_workflow() -> StateGraph:
     if _workflow is None:
         _workflow = build_trip_workflow()
         print("✅ LangGraph Planner-Centric 工作流构建完成")
-        print(f"   管道: init → data_collection(POI+Weather+Hotel+并行) → planner → budget → finalize")
+        print(f"   管道: init → data_collection(POI+Weather+Hotel+Transport并行) → planner → budget → finalize")
         print(f"   条件回路: budget → workflow_router → planner(修正) ─→ budget → finalize")
         print(f"   修正上限: revision_round < 3, 死循环保护: iteration >= max_iterations")
     return _workflow

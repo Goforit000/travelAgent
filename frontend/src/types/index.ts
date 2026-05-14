@@ -53,11 +53,22 @@ export interface WeatherInfo {
   wind_power: string
 }
 
+export interface IndoorBackupAttraction {
+  name: string
+  address: string
+  description: string
+  category: string
+  reason: string
+  estimated_duration: number
+  ticket_price: number
+}
+
 export interface Budget {
   total_attractions: number
   total_hotels: number
   total_meals: number
   total_transportation: number
+  total_intercity_transport?: number
   total: number
 }
 
@@ -67,6 +78,7 @@ export interface BudgetDetail {
   total_hotels: number
   total_meals: number
   total_transportation: number
+  total_intercity_transport?: number
   total: number
   daily_breakdown?: Array<Record<string, any>>
   savings_suggestions?: Array<Record<string, any>>
@@ -89,11 +101,49 @@ export interface DayPlan {
   meals: Meal[]
 }
 
+export type IntercityTransportMode = 'driving' | 'high_speed_rail' | 'flight'
+
+export interface IntercityRouteSegment {
+  direction: 'outbound' | 'return'
+  origin: string
+  destination: string
+  date: string
+  mode: IntercityTransportMode
+  duration_minutes: number
+  distance_km: number
+  estimated_cost: number
+  route_summary: string
+  notes: string[]
+  service_no?: string | null
+  carrier?: string | null
+  departure_place?: string | null
+  arrival_place?: string | null
+  departure_time?: string | null
+  arrival_time?: string | null
+  price_per_person?: number | null
+  data_source?: 'amap_railway' | 'amap_flight' | 'amap_driving' | 'estimated' | string
+  is_estimated?: boolean
+}
+
+export interface IntercityTransportPlan {
+  mode: IntercityTransportMode
+  outbound: IntercityRouteSegment
+  return_trip: IntercityRouteSegment
+  total_cost: number
+  total_duration_minutes: number
+  summary: string
+  warnings: string[]
+}
+
 export interface TripPlan {
   city: string
+  departure_city?: string | null
   start_date: string
   end_date: string
   people_count?: number
+  indoor_backup_attractions?: IndoorBackupAttraction[]
+  intercity_transport_mode?: IntercityTransportMode
+  intercity_transport?: IntercityTransportPlan | null
   days: DayPlan[]
   weather_info: WeatherInfo[]
   overall_suggestions: string
@@ -111,10 +161,12 @@ export interface TripPlan {
 // ============================================================
 
 export interface TripFormData {
+  departure_city?: string
   city: string
   start_date: string
   end_date: string
   travel_days: number
+  intercity_transport_mode: IntercityTransportMode
   transportation: string
   accommodation: string
   preferences: string[]
@@ -133,11 +185,13 @@ export interface TripPlanResponse {
 /** 历史计划列表项 */
 export interface HistoryItem {
   id: string
+  departure_city?: string | null
   city: string
   start_date: string
   end_date: string
   travel_days: number
   people_count: number
+  intercity_transport_mode?: IntercityTransportMode
   preferences: string[]
   budget_total: number | null
   created_at: string

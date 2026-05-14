@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import py_compile; py_compile.compile\\('app/tools/intercity_tools.py', doraise=True\\); py_compile.compile\\('app/agents/planner_agent.py', doraise=True\\); print\\('OK'\\)\")",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

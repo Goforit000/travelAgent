@@ -2,7 +2,7 @@
 LangGraph 节点函数 — 将 Agent 包装为 StateGraph 可调用的节点
 
 Planner-Centric Pipeline 架构：
-  initialize → data_collection(POI+Weather+Hotel并行) → planner → budget → (条件) → finalize
+  initialize → data_collection(POI+Weather+Hotel+Transport并行) → planner → budget → (条件) → finalize
 路由由 workflow_router 执行
 """
 
@@ -16,12 +16,14 @@ from app.tools.unsplash import get_photo_url
 from app.agents.poi_agent import POIAgent
 from app.agents.weather_agent import WeatherAgent
 from app.agents.hotel_agent import HotelAgent
+from app.agents.transport_agent import TransportAgent
 from app.agents.planner_agent import PlannerAgent
 from app.agents.budget_agent import BudgetAgent
 
 _poi_agent = POIAgent()
 _weather_agent = WeatherAgent()
 _hotel_agent = HotelAgent()
+_transport_agent = TransportAgent()
 _planner_agent = PlannerAgent()
 _budget_agent = BudgetAgent()
 
@@ -57,6 +59,7 @@ def initialize_node(state: TripState) -> dict:
         "raw_attractions": state.get("raw_attractions", []),
         "raw_weather": state.get("raw_weather", []),
         "raw_hotels": state.get("raw_hotels", []),
+        "raw_intercity_transport": state.get("raw_intercity_transport", {}),
         "raw_plan_text": state.get("raw_plan_text", ""),
         "trip_plan": state.get("trip_plan"),
         "attraction_photos": state.get("attraction_photos", {}),
@@ -64,25 +67,26 @@ def initialize_node(state: TripState) -> dict:
 
 
 # ============================================================
-# 节点 1：数据收集（并行 POI + Weather + Hotel）
+# 节点 1：数据收集（并行 POI + Weather + Hotel + Transport）
 # ============================================================
 
 def data_collection_node(state: TripState) -> dict:
     """
-    数据收集节点 — 并行运行 POI、Weather、Hotel 三个 Agent
+    数据收集节点 — 并行运行 POI、Weather、Hotel、Transport 四个 Agent
 
     - 并行执行，总耗时 = max(单 Agent 耗时)
     - 初次失败或返回空 → 自动重试 1 次（调用单 Agent 节点函数）
     - 重试仍失败/空 → 交由 Planner LLM 常识补全
     """
     print(f"\n{'=' * 60}")
-    print(f"📦 [data_collection_node] 并行数据收集开始 (POI + Weather + Hotel)")
+    print(f"📦 [data_collection_node] 并行数据收集开始 (POI + Weather + Hotel + Transport)")
     print(f"{'=' * 60}")
 
     results: dict = {
         "raw_attractions": state.get("raw_attractions", []),
         "raw_weather": state.get("raw_weather", []),
         "raw_hotels": state.get("raw_hotels", []),
+        "raw_intercity_transport": state.get("raw_intercity_transport", {}),
         "agent_outputs": dict(state.get("agent_outputs", {})),
         "error": "",
     }
@@ -112,12 +116,21 @@ def data_collection_node(state: TripState) -> dict:
             print(f"  ❌ Hotel Agent 异常: {e}")
             return {"error": f"Hotel Agent: {e}", "agent_outputs": {"hotel_agent": f"失败: {e}"}}
 
+    def run_transport():
+        try:
+            print(f"  🚄 Transport Agent 开始...")
+            return _transport_agent.run(state)
+        except Exception as e:
+            print(f"  ❌ Transport Agent 异常: {e}")
+            return {"error": f"Transport Agent: {e}", "agent_outputs": {"transport_agent": f"失败: {e}"}}
+
     round1_results: dict[str, dict] = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
             executor.submit(run_poi): "poi",
             executor.submit(run_weather): "weather",
             executor.submit(run_hotel): "hotel",
+            executor.submit(run_transport): "transport",
         }
         for future in as_completed(futures):
             agent_name = futures[future]
@@ -129,18 +142,26 @@ def data_collection_node(state: TripState) -> dict:
 
     # 合并第一轮结果 + 记录需要重试的 Agent
     retry_agents: list[str] = []
-    for agent_name in ["poi", "weather", "hotel"]:
+    for agent_name in ["poi", "weather", "hotel", "transport"]:
         agent_result = round1_results.get(agent_name, {})
         if "agent_outputs" in agent_result:
             results["agent_outputs"].update(agent_result["agent_outputs"])
-        key_map = {"poi": "raw_attractions", "weather": "raw_weather", "hotel": "raw_hotels"}
+        key_map = {
+            "poi": "raw_attractions",
+            "weather": "raw_weather",
+            "hotel": "raw_hotels",
+            "transport": "raw_intercity_transport",
+        }
         data_key = key_map[agent_name]
         if data_key in agent_result:
             results[data_key] = agent_result[data_key]
-            count = len(agent_result[data_key])
+            if isinstance(agent_result[data_key], dict):
+                count = 1 if agent_result[data_key] else 0
+            else:
+                count = len(agent_result[data_key])
             print(f"  ✅ 第1轮 {agent_name} 完成: {count} 条")
         else:
-            results[data_key] = []
+            results[data_key] = {} if agent_name == "transport" else []
             print(f"  ⚠️ 第1轮 {agent_name} 失败或无数据")
 
         # 判断是否需要重试：异常 或 返回空数据
@@ -150,7 +171,12 @@ def data_collection_node(state: TripState) -> dict:
             retry_agents.append(agent_name)
 
     # —— 第二轮：逐一重试失败的 Agent ——
-    retry_map = {"poi": (poi_node, "raw_attractions"), "weather": (weather_node, "raw_weather"), "hotel": (hotel_node, "raw_hotels")}
+    retry_map = {
+        "poi": (poi_node, "raw_attractions"),
+        "weather": (weather_node, "raw_weather"),
+        "hotel": (hotel_node, "raw_hotels"),
+        "transport": (transport_node, "raw_intercity_transport"),
+    }
     errors: list[str] = []
     for agent_name in retry_agents:
         print(f"  🔄 重试 {agent_name}...")
@@ -177,8 +203,9 @@ def data_collection_node(state: TripState) -> dict:
     total_attractions = len(results["raw_attractions"])
     total_hotels = len(results["raw_hotels"])
     total_weather = len(results["raw_weather"])
+    total_transport = 1 if results.get("raw_intercity_transport") else 0
 
-    print(f"  📊 收集汇总: {total_attractions} 景点, {total_weather} 天天气, {total_hotels} 酒店")
+    print(f"  📊 收集汇总: {total_attractions} 景点, {total_weather} 天天气, {total_hotels} 酒店, {total_transport} 个跨城交通方案")
     print(f"{'=' * 60}\n")
 
     return results
@@ -289,6 +316,22 @@ def hotel_node(state: TripState) -> dict:
         }
 
 
+def transport_node(state: TripState) -> dict:
+    """Transport Agent 节点（用于错误重试时单独调用）"""
+    print(f"\n🚄 [transport_node] 激活 Transport Agent (重试)")
+    try:
+        result = _transport_agent.run(state)
+        result["error"] = ""
+        result["retry_count"] = 0
+        return result
+    except Exception as e:
+        return {
+            "raw_intercity_transport": {},
+            "error": f"Transport Agent: {str(e)}",
+            "agent_outputs": {"transport_agent": f"重试失败: {str(e)}"},
+        }
+
+
 # ============================================================
 # 节点 6：Finalize — 最终处理
 # ============================================================
@@ -395,12 +438,23 @@ def _create_fallback_plan(request, state) -> "TripPlan":
     raw_weather 有数据 → 填充真实天气
     都没有 → 硬编码兜底
     """
-    from app.schemas.models import TripPlan, DayPlan, Attraction, Meal, Location, Hotel, WeatherInfo
+    from app.schemas.models import (
+        TripPlan,
+        DayPlan,
+        Attraction,
+        Meal,
+        Location,
+        Hotel,
+        WeatherInfo,
+        IntercityTransportPlan,
+        IndoorBackupAttraction,
+    )
 
     start = datetime.strptime(request.start_date, "%Y-%m-%d")
     raw_attractions = state.get("raw_attractions", [])
     raw_hotels = state.get("raw_hotels", [])
     raw_weather = state.get("raw_weather", [])
+    raw_intercity_transport = state.get("raw_intercity_transport", {})
 
     # 构建真实景点列表
     real_attractions: list[Attraction] = []
@@ -505,11 +559,58 @@ def _create_fallback_plan(request, state) -> "TripPlan":
         f"建议提前查看各景点开放时间，并根据实际天气情况调整出行计划。"
     )
 
+    intercity_transport = None
+    if isinstance(raw_intercity_transport, dict) and raw_intercity_transport.get("outbound") and raw_intercity_transport.get("return_trip"):
+        try:
+            intercity_transport = IntercityTransportPlan(**raw_intercity_transport)
+        except Exception:
+            intercity_transport = None
+
+    used_names = {attr.name for day in days for attr in day.attractions}
+    indoor_candidates = [
+        {
+            "name": f"{request.city}博物馆",
+            "address": f"{request.city}市中心",
+            "description": "适合了解当地历史文化的室内场馆。",
+            "category": "博物馆",
+            "reason": "室内参观受天气影响小，适合作为临时替代安排。",
+            "estimated_duration": 90,
+            "ticket_price": 0,
+        },
+        {
+            "name": f"{request.city}美术馆",
+            "address": f"{request.city}市区",
+            "description": "以艺术展览和文化展示为主的室内空间。",
+            "category": "美术馆",
+            "reason": "动线集中、节奏轻松，适合雨天或高温天气调整。",
+            "estimated_duration": 90,
+            "ticket_price": 0,
+        },
+        {
+            "name": f"{request.city}大型商业中心",
+            "address": f"{request.city}核心商圈",
+            "description": "集合购物、餐饮和休闲的综合室内场所。",
+            "category": "商场",
+            "reason": "餐饮和休息设施完善，适合作为全天候备用地点。",
+            "estimated_duration": 120,
+            "ticket_price": 0,
+        },
+    ]
+    indoor_backup_attractions = [
+        IndoorBackupAttraction(**item)
+        for item in indoor_candidates
+        if item["name"] not in used_names
+    ][:3]
+
     return TripPlan(
         city=request.city,
+        departure_city=getattr(request, "departure_city", None),
         start_date=request.start_date,
         end_date=request.end_date,
         people_count=max(1, int(getattr(request, "people_count", 1) or 1)),
+        indoor_backup_attractions=indoor_backup_attractions,
+        intercity_transport_mode=getattr(request, "intercity_transport_mode", None),
+        intercity_transport=intercity_transport,
         days=days,
         weather_info=weather_info,
         overall_suggestions=fallback_desc,

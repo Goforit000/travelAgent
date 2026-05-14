@@ -28,16 +28,14 @@
           <div v-else-if="historyList.length === 0" class="history-empty">
             暂无历史计划
           </div>
-          <div
+            <div
             v-for="item in historyList"
             :key="item.id"
             class="history-item"
             @click="openHistory(item.id)"
           >
             <div class="history-item-top">
-              <span class="history-city">🏙️ {{ item.city }}</span>
-              <span class="history-item-info">{{ item.travel_days }}天</span>
-              <span class="history-item-info">{{ item.people_count || 1 }}人</span>
+              <span class="history-city">🏙️ {{ item.departure_city ? `${item.departure_city} → 📍 ${item.city}` : item.city }}</span>
               <a-popconfirm
                 title="确定删除该计划？"
                 ok-text="删除"
@@ -50,6 +48,10 @@
             </div>
             <div class="history-item-info">
               <span>{{ item.start_date }} ~ {{ item.end_date }}</span>
+            </div>
+            <div class="history-item-info">
+              <span>{{ item.travel_days }}天</span>
+              <span>{{ item.people_count || 1 }}人</span>
               <span v-if="item.budget_total">¥{{ item.budget_total.toLocaleString() }}</span>
             </div>
           </div>
@@ -72,7 +74,24 @@
               </div>
 
               <a-row :gutter="24">
-                <a-col :span="6">
+                <a-col :span="5">
+                  <a-form-item name="departure_city">
+                    <template #label>
+                      <span class="form-label">出发地城市</span>
+                    </template>
+                    <a-input
+                      v-model:value="formData.departure_city"
+                      placeholder="例如: 沈阳"
+                      size="large"
+                      class="custom-input"
+                    >
+                      <template #prefix>
+                        <span style="color: #1890ff;">🏙️</span>
+                      </template>
+                    </a-input>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="5">
                   <a-form-item name="city" :rules="[{ required: true, message: '请输入目的地城市' }]">
                     <template #label>
                       <span class="form-label">目的地城市</span>
@@ -84,12 +103,12 @@
                       class="custom-input"
                     >
                       <template #prefix>
-                        <span style="color: #1890ff;">🏙️</span>
+                        <span style="color: #1890ff;">🚩</span>
                       </template>
                     </a-input>
                   </a-form-item>
                 </a-col>
-                <a-col :span="6">
+                <a-col :span="5">
                   <a-form-item name="start_date" :rules="[{ required: true, message: '请选择开始日期' }]">
                     <template #label>
                       <span class="form-label">开始日期</span>
@@ -103,7 +122,7 @@
                     />
                   </a-form-item>
                 </a-col>
-                <a-col :span="6">
+                <a-col :span="5">
                   <a-form-item name="end_date" :rules="[{ required: true, message: '请选择结束日期' }]">
                     <template #label>
                       <span class="form-label">结束日期</span>
@@ -138,12 +157,24 @@
                 <span class="section-title">偏好设置</span>
               </div>
 
-              <!-- 第一行：交通方式 + 住宿偏好 + 预算 -->
+              <!-- 第一行：往返交通 + 市内交通 + 住宿偏好 -->
               <a-row :gutter="24">
-                <a-col :span="6">
+                <a-col :span="8">
+                  <a-form-item name="intercity_transport_mode">
+                    <template #label>
+                      <span class="form-label">往返交通方式</span>
+                    </template>
+                    <a-select v-model:value="formData.intercity_transport_mode" size="large" class="custom-select">
+                      <a-select-option value="driving">🚗 自驾</a-select-option>
+                      <a-select-option value="high_speed_rail">🚄 高铁</a-select-option>
+                      <a-select-option value="flight">✈️ 飞机</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="8">
                   <a-form-item name="transportation">
                     <template #label>
-                      <span class="form-label">交通方式</span>
+                      <span class="form-label">市内交通方式</span>
                     </template>
                     <a-select v-model:value="formData.transportation" size="large" class="custom-select">
                       <a-select-option value="公共交通">🚇 公共交通</a-select-option>
@@ -153,7 +184,7 @@
                     </a-select>
                   </a-form-item>
                 </a-col>
-                <a-col :span="6">
+                <a-col :span="8">
                   <a-form-item name="accommodation">
                     <template #label>
                       <span class="form-label">住宿偏好</span>
@@ -166,8 +197,12 @@
                     </a-select>
                   </a-form-item>
                 </a-col>
+              </a-row>
+
+              <!-- 第二行：出行人数 + 预算上限 -->
+              <a-row :gutter="24">
                 <a-col :span="6">
-                  <a-form-item name="people_count" :rules="[{ required: true, message: '请输入出行人数' }]">
+                  <a-form-item name="people_count" :rules="[{ required: false, message: '请输入出行人数' }]">
                     <template #label>
                       <span class="form-label">出行人数</span>
                     </template>
@@ -182,7 +217,7 @@
                     />
                   </a-form-item>
                 </a-col>
-                <a-col :span="6">
+                <a-col :span="18">
                   <a-form-item name="target_budget">
                     <template #label>
                       <span class="form-label">预算上限</span>
@@ -323,10 +358,12 @@ const historyList = ref<HistoryItem[]>([])
 const historyLoading = ref(false)
 
 const formData = reactive<Omit<TripFormData, 'start_date' | 'end_date'> & { start_date: Dayjs | null; end_date: Dayjs | null }>({
+  departure_city: '',
   city: '',
   start_date: null,
   end_date: null,
   travel_days: 1,
+  intercity_transport_mode: 'high_speed_rail',
   transportation: '公共交通',
   accommodation: '经济型酒店',
   preferences: [],
@@ -351,6 +388,8 @@ const agentIcons: Record<string, string> = {
   '景点搜索': '📍',
   '天气查询': '🌤️',
   '酒店推荐': '🏨',
+  '往返交通': '🚄',
+  '数据收集 (景点+天气+酒店+往返交通)': '📦',
   '行程规划': '📋',
   '预算计算': '💰',
   '完成处理': '🏁',
@@ -416,10 +455,12 @@ const handleSubmit = async () => {
   loadingButtonText.value = '正在初始化...'
 
   const requestData: TripFormData = {
+    departure_city: formData.departure_city,
     city: formData.city,
     start_date: formData.start_date.format('YYYY-MM-DD'),
     end_date: formData.end_date.format('YYYY-MM-DD'),
     travel_days: formData.travel_days,
+    intercity_transport_mode: formData.intercity_transport_mode,
     transportation: formData.transportation,
     accommodation: formData.accommodation,
     preferences: formData.preferences,
@@ -685,7 +726,7 @@ const handleSubmit = async () => {
 
 .history-item-info {
   display: flex;
-  gap: 10px;
+  gap: 30px;
   margin-top: 4px;
   font-size: 12px;
   color: #999;

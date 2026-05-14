@@ -13,7 +13,7 @@ Multi-Agent 重构变更：
   支持工作流渐进式构建（Planner → Validator → Budget → Finalize）
 """
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -94,7 +94,8 @@ class Budget(BaseModel):
     total_attractions: int = Field(default=0, description="门票总费用")
     total_hotels: int = Field(default=0, description="酒店总费用")
     total_meals: int = Field(default=0, description="餐饮总费用")
-    total_transportation: int = Field(default=0, description="交通总费用")
+    total_transportation: int = Field(default=0, description="目的地城市内交通总费用")
+    total_intercity_transport: int = Field(default=0, description="出发地到目的地往返交通总费用")
     total: int = Field(default=0, description="总费用")
 
 
@@ -106,7 +107,8 @@ class BudgetDetail(BaseModel):
     total_attractions: int = Field(default=0, description="门票总费用")
     total_hotels: int = Field(default=0, description="酒店总费用")
     total_meals: int = Field(default=0, description="餐饮总费用")
-    total_transportation: int = Field(default=0, description="交通总费用")
+    total_transportation: int = Field(default=0, description="目的地城市内交通总费用")
+    total_intercity_transport: int = Field(default=0, description="出发地到目的地往返交通总费用")
     total: int = Field(default=0, description="总费用")
     daily_breakdown: Optional[list[dict[str, Any]]] = Field(
         default=None, description="每日费用明细"
@@ -138,6 +140,53 @@ class DayPlan(BaseModel):
     meals: list[Meal] = Field(default_factory=list, description="餐饮列表")
 
 
+class IndoorBackupAttraction(BaseModel):
+    """室内备用景点 — 整段行程的应急参考，不参与预算、地图和配图"""
+    name: str = Field(..., description="室内备用景点名称")
+    address: str = Field(default="", description="地址")
+    description: str = Field(default="", description="简要说明")
+    category: str = Field(default="室内景点", description="类别")
+    reason: str = Field(default="", description="推荐为室内备用计划的原因")
+    estimated_duration: int = Field(default=90, description="预计游览时长（分钟）")
+    ticket_price: int = Field(default=0, description="门票参考价格（元/人），不参与预算计算")
+
+
+class IntercityRouteSegment(BaseModel):
+    """跨城单程交通方案 — 去程或返程"""
+    direction: Literal["outbound", "return"] = Field(..., description="方向：outbound 去程 / return 返程")
+    origin: str = Field(..., description="出发城市")
+    destination: str = Field(..., description="到达城市")
+    date: str = Field(..., description="出行日期 YYYY-MM-DD")
+    mode: Literal["driving", "high_speed_rail", "flight"] = Field(..., description="跨城交通方式")
+    duration_minutes: int = Field(default=0, description="预计耗时（分钟）")
+    distance_km: float = Field(default=0, description="预计距离（公里）")
+    estimated_cost: int = Field(default=0, description="该单程预估总费用")
+    route_summary: str = Field(default="", description="路线摘要")
+    notes: list[str] = Field(default_factory=list, description="补充说明")
+
+
+    service_no: Optional[str] = Field(default=None, description="高铁车次或航班号")
+    carrier: Optional[str] = Field(default=None, description="承运方")
+    departure_place: Optional[str] = Field(default=None, description="出发站或出发机场")
+    arrival_place: Optional[str] = Field(default=None, description="到达站或到达机场")
+    departure_time: Optional[str] = Field(default=None, description="真实出发时间")
+    arrival_time: Optional[str] = Field(default=None, description="真实到达时间")
+    price_per_person: Optional[float] = Field(default=None, description="单人单程价格")
+    data_source: str = Field(default="estimated", description="数据来源")
+    is_estimated: bool = Field(default=True, description="是否为估算数据")
+
+
+class IntercityTransportPlan(BaseModel):
+    """出发地到目的地的往返交通计划"""
+    mode: Literal["driving", "high_speed_rail", "flight"] = Field(..., description="用户选择的跨城往返交通方式")
+    outbound: IntercityRouteSegment = Field(..., description="去程方案")
+    return_trip: IntercityRouteSegment = Field(..., description="返程方案")
+    total_cost: int = Field(default=0, description="往返总费用")
+    total_duration_minutes: int = Field(default=0, description="往返总耗时（分钟）")
+    summary: str = Field(default="", description="往返交通摘要")
+    warnings: list[str] = Field(default_factory=list, description="风险提示")
+
+
 class TripPlan(BaseModel):
     """
     完整旅行计划 — 最终返回给前端的核心数据
@@ -148,9 +197,22 @@ class TripPlan(BaseModel):
     - overall_suggestions 保持必填（finalize 节点保证兜底值）
     """
     city: str = Field(..., description="目的地城市")
+    departure_city: Optional[str] = Field(default=None, description="出发地城市")
     start_date: str = Field(..., description="开始日期")
     end_date: str = Field(..., description="结束日期")
     people_count: int = Field(default=1, description="出行人数", ge=1, le=20)
+    indoor_backup_attractions: list[IndoorBackupAttraction] = Field(
+        default_factory=list,
+        description="整段行程的室内备用景点（2-3个，不参与预算、地图和配图）",
+    )
+    intercity_transport_mode: Optional[Literal["driving", "high_speed_rail", "flight"]] = Field(
+        default=None,
+        description="用户选择的出发地到目的地往返交通方式",
+    )
+    intercity_transport: Optional[IntercityTransportPlan] = Field(
+        default=None,
+        description="出发地到目的地的往返交通计划",
+    )
     days: list[DayPlan] = Field(..., description="每日行程")
     weather_info: list[WeatherInfo] = Field(default_factory=list, description="天气信息")
     overall_suggestions: str = Field(default="", description="总体建议")
@@ -181,11 +243,16 @@ class TripPlan(BaseModel):
 
 class TripRequest(BaseModel):
     """前端表单提交的数据 — 对应 Home.vue 的表单"""
+    departure_city: Optional[str] = Field(default=None, description="出发地城市")
     city: str = Field(..., description="目的地城市")
     start_date: str = Field(..., description="开始日期 YYYY-MM-DD")
     end_date: str = Field(..., description="结束日期 YYYY-MM-DD")
     travel_days: int = Field(..., description="旅行天数", ge=1, le=30)
     people_count: int = Field(default=1, description="出行人数", ge=1, le=20)
+    intercity_transport_mode: Literal["driving", "high_speed_rail", "flight"] = Field(
+        default="high_speed_rail",
+        description="出发地到目的地的往返交通方式",
+    )
     transportation: str = Field(..., description="交通方式")
     accommodation: str = Field(..., description="住宿偏好")
     preferences: list[str] = Field(default_factory=list, description="偏好标签")

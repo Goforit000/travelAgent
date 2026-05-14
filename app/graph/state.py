@@ -30,6 +30,7 @@ class TripState(TypedDict):
     │  raw_attractions │ ← POI Agent 写入
     │  raw_weather     │ ← Weather Agent 写入
     │  raw_hotels      │ ← Hotel Agent 写入
+    │  raw_intercity_transport │ ← Transport Agent 写入
     │  raw_plan_text   │ ← Planner Agent 写入
     │  trip_plan       │ ← Finalize 节点写入
     │  phase           │ ← 当前阶段
@@ -49,6 +50,7 @@ class TripState(TypedDict):
     raw_attractions: list[dict]
     raw_weather: list[dict]
     raw_hotels: list[dict]
+    raw_intercity_transport: dict[str, Any]
     raw_plan_text: str
     attraction_photos: Annotated[dict[str, str], _merge_dicts]
 

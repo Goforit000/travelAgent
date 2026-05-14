@@ -28,11 +28,13 @@ def init_db():
     conn.execute("""
         CREATE TABLE IF NOT EXISTS trips (
             id          TEXT PRIMARY KEY,
+            departure_city TEXT,
             city        TEXT NOT NULL,
             start_date  TEXT NOT NULL,
             end_date    TEXT NOT NULL,
             travel_days INTEGER NOT NULL,
             people_count INTEGER DEFAULT 1,
+            intercity_transport_mode TEXT DEFAULT 'high_speed_rail',
             preferences TEXT DEFAULT '[]',
             budget_total REAL,
             trip_data   TEXT NOT NULL,
@@ -40,8 +42,12 @@ def init_db():
         )
     """)
     columns = [row["name"] for row in conn.execute("PRAGMA table_info(trips)").fetchall()]
+    if "departure_city" not in columns:
+        conn.execute("ALTER TABLE trips ADD COLUMN departure_city TEXT")
     if "people_count" not in columns:
         conn.execute("ALTER TABLE trips ADD COLUMN people_count INTEGER DEFAULT 1")
+    if "intercity_transport_mode" not in columns:
+        conn.execute("ALTER TABLE trips ADD COLUMN intercity_transport_mode TEXT DEFAULT 'high_speed_rail'")
     conn.commit()
     conn.close()
 
@@ -70,22 +76,30 @@ def save_trip(request, trip_plan) -> str:
     if hasattr(trip_plan, "model_dump"):
         trip_data = trip_plan.model_dump()
         trip_data["people_count"] = people_count
+        trip_data.setdefault("departure_city", getattr(request, "departure_city", None))
+        trip_data.setdefault("intercity_transport_mode", getattr(request, "intercity_transport_mode", "high_speed_rail"))
         trip_json = json.dumps(trip_data, ensure_ascii=False)
     else:
-        trip_json = json.dumps({"people_count": people_count}, ensure_ascii=False)
+        trip_json = json.dumps({
+            "people_count": people_count,
+            "departure_city": getattr(request, "departure_city", None),
+            "intercity_transport_mode": getattr(request, "intercity_transport_mode", "high_speed_rail"),
+        }, ensure_ascii=False)
 
     conn.execute(
         """
-        INSERT INTO trips (id, city, start_date, end_date, travel_days, people_count, preferences, budget_total, trip_data, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trips (id, departure_city, city, start_date, end_date, travel_days, people_count, intercity_transport_mode, preferences, budget_total, trip_data, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             trip_id,
+            getattr(request, "departure_city", None),
             getattr(request, "city", ""),
             getattr(request, "start_date", ""),
             getattr(request, "end_date", ""),
             getattr(request, "travel_days", 0),
             people_count,
+            getattr(request, "intercity_transport_mode", "high_speed_rail"),
             json.dumps(getattr(request, "preferences", []), ensure_ascii=False),
             trip_plan.budget.total if (trip_plan and trip_plan.budget) else None,
             trip_json,
@@ -102,12 +116,12 @@ def list_trips(limit: int = 20) -> list[dict]:
     查询历史计划列表（不含完整 trip_data）
 
     Returns:
-        [{id, city, start_date, end_date, travel_days, preferences, budget_total, created_at}, ...]
+        [{id, departure_city, city, start_date, end_date, travel_days, preferences, budget_total, created_at}, ...]
     """
     init_db()
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT id, city, start_date, end_date, travel_days, people_count, preferences, budget_total, created_at FROM trips ORDER BY created_at DESC LIMIT ?",
+        "SELECT id, departure_city, city, start_date, end_date, travel_days, people_count, intercity_transport_mode, preferences, budget_total, created_at FROM trips ORDER BY created_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
     conn.close()

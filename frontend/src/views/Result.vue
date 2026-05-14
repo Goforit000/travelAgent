@@ -46,6 +46,9 @@
             <a-menu-item key="budget" v-if="tripPlan.budget">
               <span>💰 预算明细</span>
             </a-menu-item>
+            <a-menu-item key="intercity" v-if="hasIntercityTransport">
+              <span>🚄 往返交通</span>
+            </a-menu-item>
             <a-menu-item key="map">
               <span>📍 景点地图</span>
             </a-menu-item>
@@ -57,27 +60,40 @@
             <a-menu-item key="weather" v-if="tripPlan.weather_info && tripPlan.weather_info.length > 0">
               <span>🌤️ 天气信息</span>
             </a-menu-item>
+            <a-menu-item key="indoor-backup">
+              <span>🏛️ 室内备用</span>
+            </a-menu-item>
           </a-menu>
         </a-affix>
       </div>
 
       <!-- 主内容区 -->
       <div class="main-content">
-        <!-- 顶部信息区:左侧概览+预算,右侧地图 -->
+        <!-- 顶部信息区：第一行 概览 + 预算；第二行 往返交通 + 地图 -->
         <div class="top-info-section">
-          <!-- 左侧:行程概览和预算明细 -->
-          <div class="left-info">
+          <div class="top-overview-row">
             <!-- 行程概览 -->
             <a-card id="overview" :title="`${tripPlan.city}旅行计划`" :bordered="false" class="overview-card">
               <div class="overview-content">
                 <div class="info-group">
+                  <div class="info-item" v-if="tripPlan.departure_city">
+                    <span class="info-label">🏙️ 出发地:</span>
+                    <span class="info-value">{{ tripPlan.departure_city }}</span>
+                  </div>
                   <div class="info-item">
-                    <span class="info-label">📅 日期:</span>
-                    <span class="info-value">{{ tripPlan.start_date }} 至 {{ tripPlan.end_date }}</span>
+                    <span class="info-label">🚩 目的地:</span>
+                    <span class="info-value">{{ tripPlan.city }}</span>
                   </div>
                   <div class="info-item">
                     <span class="info-label">👥 人数:</span>
                     <span class="info-value">{{ tripPlan.people_count || 1 }} 人</span>
+                  </div>
+                </div>
+
+                <div class="info-group">
+                  <div class="info-item">
+                    <span class="info-label">📅 日期:</span>
+                    <span class="info-value">{{ tripPlan.start_date }} 至 {{ tripPlan.end_date }}</span>
                   </div>
                 </div>
                 <div class="info-item">
@@ -103,8 +119,12 @@
                   <div class="budget-value">¥{{ tripPlan.budget.total_meals }}</div>
                 </div>
                 <div class="budget-item">
-                  <div class="budget-label">交通费用</div>
+                  <div class="budget-label">市内交通</div>
                   <div class="budget-value">¥{{ tripPlan.budget.total_transportation }}</div>
+                </div>
+                <div class="budget-item" v-if="tripPlan.budget.total_intercity_transport">
+                  <div class="budget-label">往返交通</div>
+                  <div class="budget-value">¥{{ tripPlan.budget.total_intercity_transport }}</div>
                 </div>
               </div>
               <div class="budget-total">
@@ -112,10 +132,83 @@
                 <span class="total-value">¥{{ tripPlan.budget.total }}</span>
               </div>
             </a-card>
+
           </div>
 
-          <!-- 右侧:地图 -->
-          <div class="right-map">
+          <div class="top-map-row" :class="{ 'no-intercity': !hasIntercityTransport }">
+            <!-- 左侧:往返交通 -->
+            <a-card id="intercity" v-if="hasIntercityTransport && tripPlan.intercity_transport" title="✈️ 往返交通信息" :bordered="false" class="intercity-card">
+              <div class="intercity-summary">
+                {{ tripPlan.intercity_transport.summary }}
+              </div>
+              <div class="intercity-route">
+                <div class="route-segment">
+                  <div class="route-title">去程</div>
+                  <div class="route-main">
+                    {{ tripPlan.intercity_transport.outbound.origin }} → {{ tripPlan.intercity_transport.outbound.destination }}
+                  </div>
+                  <div class="route-meta">
+                    {{ tripPlan.intercity_transport.outbound.date }} · {{ getIntercityModeLabel(tripPlan.intercity_transport.outbound.mode) }} · {{ formatDuration(tripPlan.intercity_transport.outbound.duration_minutes) }}
+                  </div>
+                  <div v-if="tripPlan.intercity_transport.outbound.service_no" class="route-service">
+                    班次: {{ tripPlan.intercity_transport.outbound.service_no }}
+                  </div>
+                  <div v-else-if="tripPlan.intercity_transport.outbound.is_estimated" class="route-service estimated">
+                    估算数据，未获取到真实班次
+                  </div>
+                  <div class="route-detail" v-if="tripPlan.intercity_transport.outbound.departure_place || tripPlan.intercity_transport.outbound.arrival_place">
+                    {{ tripPlan.intercity_transport.outbound.departure_place || tripPlan.intercity_transport.outbound.origin }}
+                    →
+                    {{ tripPlan.intercity_transport.outbound.arrival_place || tripPlan.intercity_transport.outbound.destination }}
+                  </div>
+                  <div class="route-detail" v-if="tripPlan.intercity_transport.outbound.departure_time || tripPlan.intercity_transport.outbound.arrival_time">
+                    出发: {{ formatIntercityTime(tripPlan.intercity_transport.outbound.departure_time) }}
+                    · 到达: {{ formatIntercityTime(tripPlan.intercity_transport.outbound.arrival_time) }}
+                  </div>
+                  <div class="route-detail" v-if="tripPlan.intercity_transport.outbound.price_per_person">
+                    单人价格: ¥{{ tripPlan.intercity_transport.outbound.price_per_person }}
+                  </div>
+                  <div class="route-cost">团队单程 ¥{{ tripPlan.intercity_transport.outbound.estimated_cost }}</div>
+                </div>
+                <div class="route-segment">
+                  <div class="route-title">返程</div>
+                  <div class="route-main">
+                    {{ tripPlan.intercity_transport.return_trip.origin }} → {{ tripPlan.intercity_transport.return_trip.destination }}
+                  </div>
+                  <div class="route-meta">
+                    {{ tripPlan.intercity_transport.return_trip.date }} · {{ getIntercityModeLabel(tripPlan.intercity_transport.return_trip.mode) }} · {{ formatDuration(tripPlan.intercity_transport.return_trip.duration_minutes) }}
+                  </div>
+                  <div v-if="tripPlan.intercity_transport.return_trip.service_no" class="route-service">
+                    班次: {{ tripPlan.intercity_transport.return_trip.service_no }}
+                  </div>
+                  <div v-else-if="tripPlan.intercity_transport.return_trip.is_estimated" class="route-service estimated">
+                    估算数据，未获取到真实班次
+                  </div>
+                  <div class="route-detail" v-if="tripPlan.intercity_transport.return_trip.departure_place || tripPlan.intercity_transport.return_trip.arrival_place">
+                    {{ tripPlan.intercity_transport.return_trip.departure_place || tripPlan.intercity_transport.return_trip.origin }}
+                    →
+                    {{ tripPlan.intercity_transport.return_trip.arrival_place || tripPlan.intercity_transport.return_trip.destination }}
+                  </div>
+                  <div class="route-detail" v-if="tripPlan.intercity_transport.return_trip.departure_time || tripPlan.intercity_transport.return_trip.arrival_time">
+                    出发: {{ formatIntercityTime(tripPlan.intercity_transport.return_trip.departure_time) }}
+                    · 到达: {{ formatIntercityTime(tripPlan.intercity_transport.return_trip.arrival_time) }}
+                  </div>
+                  <div class="route-detail" v-if="tripPlan.intercity_transport.return_trip.price_per_person">
+                    单人价格: ¥{{ tripPlan.intercity_transport.return_trip.price_per_person }}
+                  </div>
+                  <div class="route-cost">团队单程 ¥{{ tripPlan.intercity_transport.return_trip.estimated_cost }}</div>
+                </div>
+              </div>
+              <div class="intercity-total">
+                <span>往返交通合计</span>
+                <strong>¥{{ tripPlan.intercity_transport.total_cost }}</strong>
+              </div>
+              <div v-if="tripPlan.intercity_transport.warnings && tripPlan.intercity_transport.warnings.length" class="intercity-warnings">
+                <div v-for="warning in tripPlan.intercity_transport.warnings" :key="warning">⚠️ {{ warning }}</div>
+              </div>
+            </a-card>
+
+            <!-- 右侧:地图 -->
             <a-card id="map" title="📍 景点地图" :bordered="false" class="map-card">
               <div id="amap-container" style="width: 100%; height: 100%"></div>
             </a-card>
@@ -298,6 +391,32 @@
           </template>
         </a-list>
         </a-card>
+
+        <!-- 室内备用计划 -->
+        <a-card id="indoor-backup" title="🏛️ 室内备用计划" :bordered="false" class="indoor-backup-section">
+          <div v-if="indoorBackupAttractions.length > 0" class="indoor-backup-list">
+            <div
+              v-for="item in indoorBackupAttractions"
+              :key="item.name"
+              class="indoor-backup-item"
+            >
+              <div class="indoor-backup-title">
+                <span>{{ item.name }}</span>
+                <span class="indoor-backup-category">{{ item.category }}</span>
+              </div>
+              <div class="indoor-backup-address">{{ item.address }}</div>
+              <div class="indoor-backup-description">{{ item.description }}</div>
+              <div class="indoor-backup-reason">{{ item.reason }}</div>
+              <div class="indoor-backup-meta">
+                <span>{{ item.estimated_duration }} 分钟</span>
+                <span>¥{{ item.ticket_price || 0 }}/人</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="indoor-backup-empty">
+            暂无备用室内景点
+          </div>
+        </a-card>
       </div>
     </div>
 
@@ -321,7 +440,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { computed, ref, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { DownOutlined } from '@ant-design/icons-vue'
@@ -339,6 +458,15 @@ const attractionPhotos = ref<Record<string, string>>({})
 const activeSection = ref('overview')
 const activeDays = ref<number[]>([0]) // 默认展开第一天
 let map: any = null
+
+const hasIntercityTransport = computed(() => {
+  const transport = tripPlan.value?.intercity_transport
+  return !!(transport && transport.outbound && transport.return_trip)
+})
+
+const indoorBackupAttractions = computed(() => {
+  return tripPlan.value?.indoor_backup_attractions || []
+})
 
 onMounted(async () => {
   const routeTripId = route.query.id as string
@@ -454,6 +582,40 @@ const getMealLabel = (type: string): string => {
     snack: '小吃'
   }
   return labels[type] || type
+}
+
+const getIntercityModeLabel = (mode: string): string => {
+  const labels: Record<string, string> = {
+    driving: '自驾',
+    high_speed_rail: '高铁',
+    flight: '飞机',
+  }
+  return labels[mode] || mode
+}
+
+const formatDuration = (minutes: number): string => {
+  const safeMinutes = Math.max(0, Number(minutes) || 0)
+  const hours = Math.floor(safeMinutes / 60)
+  const mins = safeMinutes % 60
+  if (hours <= 0) return `${mins}分钟`
+  if (mins <= 0) return `${hours}小时`
+  return `${hours}小时${mins}分钟`
+}
+
+const formatIntercityTime = (value?: string | null): string => {
+  if (!value) return '暂无'
+  const text = String(value)
+  if (text.includes('T')) {
+    const date = new Date(text)
+    if (!Number.isNaN(date.getTime())) {
+      const month = `${date.getMonth() + 1}`.padStart(2, '0')
+      const day = `${date.getDate()}`.padStart(2, '0')
+      const hour = `${date.getHours()}`.padStart(2, '0')
+      const minute = `${date.getMinutes()}`.padStart(2, '0')
+      return `${month}-${day} ${hour}:${minute}`
+    }
+  }
+  return text
 }
 
 // 加载所有景点图片
@@ -1099,24 +1261,34 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
 /* 顶部信息区布局 */
 .top-info-section {
   display: flex;
+  flex-direction: column;
   gap: 20px;
   margin-bottom: 20px;
 }
 
-.left-info {
-  flex: 0 0 400px;
-  display: flex;
-  flex-direction: column;
+.top-overview-row,
+.top-map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
   gap: 20px;
+  align-items: stretch;
 }
 
-.right-map {
-  flex: 1;
+.top-map-row {
+  grid-template-columns: 420px minmax(0, 1fr);
+}
+
+.top-map-row.no-intercity {
+  grid-template-columns: 1fr;
+}
+
+.top-map-row.no-intercity .map-card {
+  min-height: 500px;
 }
 
 /* 行程概览卡片 */
 .overview-card {
-  height: fit-content;
+  height: 100%;
 }
 
 .overview-content {
@@ -1151,12 +1323,183 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
 
 /* 预算卡片 */
 .budget-card {
-  height: fit-content;
+  height: 100%;
+}
+
+.intercity-card {
+  height: 100%;
+}
+
+.indoor-backup-section {
+  margin-top: 20px;
+}
+
+.indoor-backup-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.indoor-backup-item {
+  padding: 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.indoor-backup-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 6px;
+  color: #333;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.indoor-backup-category {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f0f5ff;
+  color: #597ef7;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.indoor-backup-address {
+  color: #666;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+.indoor-backup-description,
+.indoor-backup-reason {
+  color: #333;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+
+.indoor-backup-reason {
+  color: #666;
+}
+
+.indoor-backup-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  color: #1890ff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.indoor-backup-empty {
+  height: 100%;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  border: 1px dashed #d9d9d9;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.intercity-summary {
+  color: #333;
+  line-height: 1.7;
+  margin-bottom: 16px;
+}
+
+.intercity-route {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.route-segment {
+  padding: 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
+}
+
+.route-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #667eea;
+  margin-bottom: 4px;
+}
+
+.route-main {
+  font-size: 16px;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.route-meta {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+}
+
+.route-service {
+  margin-bottom: 6px;
+  color: #333;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.route-service.estimated {
+  color: #ad6800;
+}
+
+.route-detail {
+  color: #555;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.route-cost {
+  margin-top: 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1890ff;
+}
+
+.intercity-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f0f5ff;
+  color: #333;
+}
+
+.intercity-total strong {
+  font-size: 22px;
+  color: #1890ff;
+}
+
+.intercity-warnings {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff7e6;
+  color: #ad6800;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .budget-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin-bottom: 16px;
 }
@@ -1374,6 +1717,27 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
   .page-header {
     flex-direction: column;
     gap: 16px;
+  }
+
+  .content-wrapper {
+    flex-direction: column;
+  }
+
+  .side-nav {
+    width: 100%;
+  }
+
+  .top-overview-row,
+  .top-map-row {
+    grid-template-columns: 1fr;
+  }
+
+  .indoor-backup-list {
+    grid-template-columns: 1fr;
+  }
+
+  .map-card {
+    min-height: 420px;
   }
 }
 </style>

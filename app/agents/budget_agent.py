@@ -7,12 +7,12 @@ Budget Agent — 负责计算旅行计划预算，超限时生成削减建议（
 3. 对比 target_budget：
    - 未超限 → 输出 "OK" + 预算汇总
    - 超限 → 调用 suggest_savings_tool 生成削减建议 → 输出 "OVERSHOOT|{json}"
-     （由 Supervisor 路由给 Planner Agent 执行修正，Budget 不修改 JSON）
+     （由 workflow_router 路由给 Planner Agent 执行修正，Budget 不修改 JSON）
 
 设计理由：
 - Budget Agent 的职责是"计算 + 建议"，不应越界修改行程 JSON
 - 行程 JSON 修改由 Planner Agent 负责（它掌握完整 schema）
-- Supervisor 作为唯一路由决策点，统一处理超限回退逻辑
+- workflow_router 作为确定性路由，统一处理超限回退逻辑
 """
 
 import json
@@ -46,17 +46,19 @@ class BudgetAgent(BaseAgent):
 
 ### 情况 A：无目标预算（target_budget = 0）或未超限
 输出：
-{"status": "ok", "budget": {"total_attractions": N, "total_hotels": N, "total_meals": N, "total_transportation": N, "total": N}, "analysis": "预算分析总结"}
+{"status": "ok", "budget": {"total_attractions": N, "total_hotels": N, "total_meals": N, "total_transportation": N, "total_intercity_transport": N, "total": N}, "analysis": "预算分析总结"}
 
 ### 情况 B：超限（总费用 > target_budget）
 1. 调用 suggest_savings_tool 获取削减建议
 2. 输出：
-{"status": "overshoot", "budget": {"total_attractions": N, ...}, "people_count": N, "target_budget_per_person": N, "target_budget_total": N, "target_budget": N, "overshoot_amount": N, "savings_suggestions": [{"category": "...", "current": N, "suggested": N, "saving": N, "description": "..."}], "analysis": "超限分析总结"}
+{"status": "overshoot", "budget": {"total_attractions": N, "total_hotels": N, "total_meals": N, "total_transportation": N, "total_intercity_transport": N, "total": N}, "people_count": N, "target_budget_per_person": N, "target_budget_total": N, "target_budget": N, "overshoot_amount": N, "savings_suggestions": [{"category": "...", "current": N, "suggested": N, "saving": N, "description": "..."}], "analysis": "超限分析总结"}
 
 重要：
 - 不修改旅行计划 JSON
-- Planner JSON 中的交通字段语义：budget.total_transportation 是全程交通单价；非自驾为每人这些天费用，自驾为每辆车这些天费用。
+- Planner JSON 中的市内交通字段语义：budget.total_transportation 是目的地城市内全程交通单价；非自驾为每人这些天费用，自驾为每辆车这些天费用。
 - 如果 Planner 未提供 budget.total_transportation，calculate_budget_tool 会按 transport_cost_per_day × travel_days 估算全程交通单价；非自驾再乘人数，自驾再乘车辆数。
+- intercity_transport.total_cost 是出发地到目的地的往返交通团队总费用，计入 budget.total_intercity_transport。
+- 跨城往返交通方式由用户固定选择，超预算时只能建议用户手动调整，不能要求 Planner 擅自切换。
 - 如果计算工具返回了 warnings，在 analysis 中提及"""
 
     @property
@@ -80,9 +82,11 @@ class BudgetAgent(BaseAgent):
             return "错误：State 中缺少 request 字段"
 
         city = getattr(request, "city", "未知")
+        departure_city = getattr(request, "departure_city", "") or "未填写"
         accommodation = getattr(request, "accommodation", "经济型酒店")
         travel_days = getattr(request, "travel_days", 1)
         people_count = max(1, int(getattr(request, "people_count", 1) or 1))
+        intercity_mode = getattr(request, "intercity_transport_mode", "high_speed_rail")
         target_budget_per_person = getattr(request, "target_budget", 0) or 0
         target_budget_total = target_budget_per_person * people_count if target_budget_per_person > 0 else 0
 
@@ -106,8 +110,10 @@ class BudgetAgent(BaseAgent):
         return f"""请计算以下旅行计划的预算：
 
 目的地城市：{city}
+出发地城市：{departure_city}
 旅行天数：{travel_days} 天
 出行人数：{people_count} 人
+跨城往返交通方式：{intercity_mode}（用户固定选择，Planner 不应自动修改）
 住宿偏好：{accommodation}（估算每晚 {hotel_cost_per_night} 元）
 交通方式：{transportation}（缺失时按非自驾每人每天 / 自驾每辆车每天 {transport_cost_per_day} 元估算）
 {budget_line}
@@ -116,8 +122,9 @@ class BudgetAgent(BaseAgent):
 - attractions[].ticket_price：单人票价。
 - meals[].estimated_cost：单人单餐费用。
 - hotel.estimated_cost：每间每晚费用。
-- budget.total_transportation：全程交通单价；非自驾为每人这些天费用，自驾为每辆车这些天费用。
+- budget.total_transportation：目的地城市内全程交通单价；非自驾为每人这些天费用，自驾为每辆车这些天费用。
 - 如果 Planner 未提供 budget.total_transportation，则使用 transport_cost_per_day × travel_days 估算全程交通单价。
+- intercity_transport.total_cost：出发地到目的地往返交通团队总费用。
 
 === 旅行计划 JSON ===
 {raw_plan_text}
@@ -190,6 +197,8 @@ class BudgetAgent(BaseAgent):
                 "target_budget_per_person": target_budget_per_person,
                 "target_budget_total": target_budget,
                 "people_count": people_count,
+                "intercity_transport_mode": getattr(request, "intercity_transport_mode", "high_speed_rail") if request else "high_speed_rail",
+                "total_intercity_transport": budget.get("total_intercity_transport", 0),
                 "overshoot_amount": overshoot_amount,
                 "budget": budget,
                 "savings_suggestions": savings_suggestions,
@@ -254,6 +263,7 @@ class BudgetAgent(BaseAgent):
             "total_hotels": int(budget.get("total_hotels", 0) or 0),
             "total_meals": int(budget.get("total_meals", 0) or 0),
             "total_transportation": int(budget.get("total_transportation", 0) or 0),
+            "total_intercity_transport": int(budget.get("total_intercity_transport", 0) or 0),
             "total": int(budget.get("total", 0) or 0),
         }
 
