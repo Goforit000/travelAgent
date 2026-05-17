@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1350" height="1050" viewBox="0 0 1350 1050" role="img" aria-labelledby="title desc">
+  <title id="title">LangGraph 工作流图</title>
+  <desc id="desc">展示 initialize_node、data_collection_node、planner_node、budget_node、workflow_router 和 finalize_node 的执行关系，并展示预算超限时回到 planner_node 的重规划回路。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#334155"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#dc2626"/>
+    </marker>
+    <style>
+      .bg { fill: #ffffff; }
+      .title { font: 700 34px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 500 17px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #475569; }
+      .node { fill: #ffffff; stroke: #2563eb; stroke-width: 2.4; rx: 12; }
+      .router { fill: #fefce8; stroke: #ca8a04; stroke-width: 2.5; rx: 12; }
+      .final { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2.5; rx: 12; }
+      .agent { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.8; rx: 10; }
+      .skip { fill: #f1f5f9; stroke: #64748b; stroke-width: 1.8; rx: 10; }
+      .node-title { font: 700 21px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #0f172a; }
+      .node-text { font: 500 15px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #334155; }
+      .small { font: 500 14px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #475569; }
+      .label { font: 600 14px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #334155; }
+      .green-label { font: 600 14px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #15803d; }
+      .red-label { font: 600 14px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #b91c1c; }
+      .line { fill: none; stroke: #334155; stroke-width: 2.3; marker-end: url(#arrow); }
+      .line-green { fill: none; stroke: #16a34a; stroke-width: 2.3; marker-end: url(#arrowGreen); }
+      .line-red { fill: none; stroke: #dc2626; stroke-width: 2.3; stroke-dasharray: 8 6; marker-end: url(#arrowRed); }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1350" height="1050"/>
+  <text class="title" x="675" y="58" text-anchor="middle">LangGraph 工作流图</text>
+  <text class="subtitle" x="675" y="90" text-anchor="middle">主流程自上而下执行；预算超限回路放在右侧，数据异常重试回路放在左侧</text>
+
+  <!-- Main vertical workflow -->
+  <rect class="node" x="495" y="130" width="360" height="105"/>
+  <text class="node-title" x="675" y="165" text-anchor="middle">initialize_node</text>
+  <text class="node-text" x="530" y="195">将用户请求转换为工作流状态</text>
+  <text class="node-text" x="530" y="220">设置迭代次数、错误信息、Agent 输出容器</text>
+
+  <rect class="node" x="450" y="310" width="450" height="150"/>
+  <text class="node-title" x="675" y="345" text-anchor="middle">data_collection_node</text>
+  <text class="node-text" x="485" y="375">并行执行数据收集任务，减少整体等待时间</text>
+  <text class="node-text" x="485" y="402">同时调用 POI、Weather、Hotel 相关逻辑</text>
+  <text class="node-text" x="485" y="429">用户填写出发地时才调用 Transport；否则跳过</text>
+
+  <rect class="agent" x="250" y="345" width="120" height="46"/>
+  <text class="small" x="310" y="374" text-anchor="middle">POI</text>
+  <rect class="agent" x="250" y="410" width="120" height="46"/>
+  <text class="small" x="310" y="439" text-anchor="middle">Weather</text>
+  <rect class="agent" x="980" y="345" width="120" height="46"/>
+  <text class="small" x="1040" y="374" text-anchor="middle">Hotel</text>
+  <rect class="agent" x="980" y="410" width="120" height="46"/>
+  <text class="small" x="1040" y="439" text-anchor="middle">Transport</text>
+  <path class="line" d="M 450 368 L 370 368"/>
+  <path class="line" d="M 450 433 L 370 433"/>
+  <path class="line" d="M 900 368 L 980 368"/>
+  <path class="line" d="M 900 433 L 980 433"/>
+  <text class="label" x="1040" y="480" text-anchor="middle">无出发地则跳过 Transport</text>
+
+  <rect class="node" x="495" y="540" width="360" height="105"/>
+  <text class="node-title" x="675" y="575" text-anchor="middle">planner_node</text>
+  <text class="node-text" x="530" y="605">调用 Planner Agent 生成结构化旅游计划</text>
+  <text class="node-text" x="530" y="630">输出 raw_plan_text 或计划草稿</text>
+
+  <rect class="node" x="495" y="720" width="360" height="105"/>
+  <text class="node-title" x="675" y="755" text-anchor="middle">budget_node</text>
+  <text class="node-text" x="530" y="785">调用 Budget Agent 进行预算核算</text>
+  <text class="node-text" x="530" y="810">计算门票、餐饮、酒店、交通和总费用</text>
+
+  <rect class="router" x="495" y="895" width="360" height="105"/>
+  <text class="node-title" x="675" y="930" text-anchor="middle">workflow_router</text>
+  <text class="node-text" x="530" y="960">确定性路由，替代 Supervisor Agent</text>
+  <text class="node-text" x="530" y="985">依据预算、错误、完整性和迭代次数决策</text>
+
+  <rect class="final" x="930" y="895" width="300" height="105"/>
+  <text class="node-title" x="1080" y="930" text-anchor="middle">finalize_node</text>
+  <text class="node-text" x="965" y="960">解析 TripPlan、补全字段</text>
+  <text class="node-text" x="965" y="985">保存历史记录并返回前端</text>
+
+  <!-- Main edges -->
+  <path class="line" d="M 675 235 L 675 310"/>
+  <text class="label" x="700" y="278">初始化完成</text>
+
+  <path class="line" d="M 675 460 L 675 540"/>
+  <text class="label" x="700" y="505">数据收集完成</text>
+
+  <path class="line" d="M 675 645 L 675 720"/>
+  <text class="label" x="700" y="688">计划生成完成</text>
+
+  <path class="line" d="M 675 825 L 675 895"/>
+  <text class="label" x="700" y="865">预算核算完成</text>
+
+  <path class="line-green" d="M 855 947 L 930 947"/>
+  <text class="green-label" x="892" y="930" text-anchor="middle">通过</text>
+
+  <!-- Budget overrun loop on right side, no crossing -->
+  <path class="line-red" d="M 855 925 C 1160 810, 1160 610, 855 592"/>
+  <text class="red-label" x="1150" y="750" text-anchor="middle">预算超限且未达迭代上限</text>
+  <text class="red-label" x="1150" y="772" text-anchor="middle">回到 planner_node 重规划</text>
+
+  <!-- Data error retry loop on left side, no crossing -->
+  <path class="line-red" d="M 495 972 C 170 850, 170 410, 450 385"/>
+  <text class="red-label" x="185" y="675" text-anchor="middle">数据异常或缺失</text>
+  <text class="red-label" x="185" y="697" text-anchor="middle">回到 data_collection_node 重试</text>
+
+  <!-- Iteration limit fallback -->
+  <path class="line-green" d="M 675 1000 C 675 1030, 1080 1030, 1080 1000"/>
+  <text class="green-label" x="878" y="1024" text-anchor="middle">达到迭代上限或可接受降级结果，进入最终处理</text>
+
+  <!-- Design note -->
+  <rect class="skip" x="70" y="130" width="340" height="105"/>
+  <text class="node-title" x="100" y="165">路由设计说明</text>
+  <text class="small" x="100" y="195">主流程较固定，频繁使用 LLM 路由会增加</text>
+  <text class="small" x="100" y="220">时间和 token 成本，因此采用确定性 router。</text>
+
+  <!-- Legend -->
+  <rect class="skip" x="70" y="930" width="365" height="78"/>
+  <text class="small" x="95" y="958">图例：黑色实线表示主执行边；</text>
+  <text class="small" x="95" y="980">绿色表示进入最终处理；</text>
+  <text class="small" x="95" y="1002">红色虚线表示预算超限回路或异常重试路径。</text>
+</svg>

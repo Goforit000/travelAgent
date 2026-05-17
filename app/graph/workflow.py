@@ -87,6 +87,6 @@ def get_workflow() -> StateGraph:
         _workflow = build_trip_workflow()
         print("✅ LangGraph Planner-Centric 工作流构建完成")
         print(f"   管道: init → data_collection(POI+Weather+Hotel+Transport并行) → planner → budget → finalize")
-        print(f"   条件回路: budget → workflow_router → planner(修正) ─→ budget → finalize")
+        print(f"   条件回路: budget → workflow_router → planner(修正) → budget → finalize")
         print(f"   修正上限: revision_round < 3, 死循环保护: iteration >= max_iterations")
     return _workflow

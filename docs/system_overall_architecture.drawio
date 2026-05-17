@@ -1,0 +1,144 @@
+<mxfile host="app.diagrams.net" modified="2026-05-16T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="system-overall-architecture" name="系统总体架构图">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="&lt;font face=&quot;SimSun&quot;&gt;系统总体架构图&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontFamily=SimSun;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="25" width="360" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="label-user" value="&lt;font face=&quot;SimSun&quot;&gt;用户交互层&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9CCAF2;strokeColor=#4D88C7;fontFamily=SimSun;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="45" y="95" width="120" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="label-api" value="&lt;font face=&quot;SimSun&quot;&gt;接口服务层&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9CCAF2;strokeColor=#4D88C7;fontFamily=SimSun;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="45" y="270" width="120" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="label-agent" value="&lt;font face=&quot;SimSun&quot;&gt;智能体工作流层&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9CCAF2;strokeColor=#4D88C7;fontFamily=SimSun;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="45" y="445" width="120" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="label-tool" value="&lt;font face=&quot;SimSun&quot;&gt;工具与数据层&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9CCAF2;strokeColor=#4D88C7;fontFamily=SimSun;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="45" y="720" width="120" height="190" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="panel-user" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF3FF;strokeColor=#6C8EBF;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="190" y="95" width="1320" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel-api" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF8EA;strokeColor=#82B366;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="190" y="270" width="1320" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel-agent" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF4E6;strokeColor=#D79B00;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="190" y="445" width="1320" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel-tool" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8EAF8;strokeColor=#B85450;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="190" y="720" width="1320" height="190" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="browser" value="&lt;font face=&quot;SimSun&quot;&gt;浏览器访问&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;Times New Roman&quot;&gt;Browser&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6C8EBF;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="245" y="132" width="135" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="vue" value="&lt;font face=&quot;SimSun&quot;&gt;前端页面&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;Times New Roman&quot;&gt;Vue + TypeScript&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="455" y="125" width="165" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="home" value="&lt;font face=&quot;SimSun&quot;&gt;首页输入页面&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;SimSun&quot;&gt;目的地、日期、人数、预算&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6C8EBF;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="705" y="118" width="190" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="progress" value="&lt;font face=&quot;SimSun&quot;&gt;生成进度展示&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;Times New Roman&quot;&gt;SSE&lt;/font&gt;&lt;font face=&quot;SimSun&quot;&gt; 实时状态&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6C8EBF;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="960" y="124" width="170" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="result" value="&lt;font face=&quot;SimSun&quot;&gt;结果展示页面&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;SimSun&quot;&gt;行程、地图、预算&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6C8EBF;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="1195" y="124" width="170" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="history-ui" value="&lt;font face=&quot;SimSun&quot;&gt;历史计划侧边栏&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6C8EBF;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="135" width="95" height="62" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="fastapi" value="&lt;font face=&quot;Times New Roman&quot;&gt;FastAPI&lt;/font&gt;&lt;font face=&quot;SimSun&quot;&gt; 后端服务&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="245" y="313" width="170" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="api-plan" value="&lt;font face=&quot;SimSun&quot;&gt;计划生成接口&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;Times New Roman&quot;&gt;POST /plan/stream&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82B366;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="515" y="303" width="180" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="api-validate" value="&lt;font face=&quot;SimSun&quot;&gt;参数校验与状态构造&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;Times New Roman&quot;&gt;TripRequest / TripState&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82B366;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="795" y="303" width="220" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="api-sse" value="&lt;font face=&quot;Times New Roman&quot;&gt;SSE&lt;/font&gt;&lt;font face=&quot;SimSun&quot;&gt; 事件推送&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;Times New Roman&quot;&gt;progress / done / error&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82B366;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="1115" y="303" width="210" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="api-history" value="&lt;font face=&quot;SimSun&quot;&gt;历史计划服务&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;SimSun&quot;&gt;保存 / 查询&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82B366;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="1375" y="313" width="110" height="68" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="workflow-box" value="&lt;font face=&quot;Times New Roman&quot;&gt;LangGraph&lt;/font&gt;&lt;font face=&quot;SimSun&quot;&gt; 工作流&lt;/font&gt;" style="swimlane;html=1;startSize=28;rounded=1;whiteSpace=wrap;fillColor=#FFF9F0;strokeColor=#D79B00;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="230" y="475" width="1245" height="185" as="geometry"/>
+        </mxCell>
+        <mxCell id="tripstate" value="&lt;font face=&quot;SimSun&quot;&gt;共享状态&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;Times New Roman&quot;&gt;TripState&lt;/font&gt;" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="265" y="535" width="125" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="data-collect-group" value="&lt;font face=&quot;SimSun&quot;&gt;并发数据收集&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;dashed=1;fontFamily=SimSun;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="445" y="515" width="435" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="transport-agent" value="&lt;font face=&quot;Times New Roman&quot;&gt;Transport Agent&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D79B00;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="470" y="548" width="125" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="poi-agent" value="&lt;font face=&quot;Times New Roman&quot;&gt;POI Agent&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D79B00;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="610" y="548" width="105" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="weather-agent" value="&lt;font face=&quot;Times New Roman&quot;&gt;Weather Agent&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D79B00;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="730" y="548" width="125" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="hotel-agent" value="&lt;font face=&quot;Times New Roman&quot;&gt;Hotel Agent&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D79B00;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="610" y="595" width="105" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="plan-budget-group" value="&lt;font face=&quot;SimSun&quot;&gt;计划生成与预算校验&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;dashed=1;fontFamily=SimSun;fontSize=10.5;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="940" y="515" width="500" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="planner-agent" value="&lt;font face=&quot;Times New Roman&quot;&gt;Planner Agent&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;SimSun&quot;&gt;行程整合&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D79B00;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="965" y="548" width="130" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="budget-agent" value="&lt;font face=&quot;Times New Roman&quot;&gt;Budget Agent&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;SimSun&quot;&gt;费用核算&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D79B00;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="1130" y="548" width="130" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="router" value="&lt;font face=&quot;Times New Roman&quot;&gt;workflow_router&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;SimSun&quot;&gt;条件控制&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D79B00;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="1295" y="548" width="120" height="55" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="tool-map" value="&lt;font face=&quot;SimSun&quot;&gt;地图与路线服务&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;SimSun&quot;&gt;高德 POI / 自驾&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="235" y="775" width="170" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="tool-weather" value="&lt;font face=&quot;SimSun&quot;&gt;天气查询工具&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="460" y="775" width="145" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="tool-hotel" value="&lt;font face=&quot;SimSun&quot;&gt;酒店搜索工具&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="660" y="775" width="145" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="tool-rail" value="&lt;font face=&quot;Times New Roman&quot;&gt;12306&lt;/font&gt;&lt;font face=&quot;SimSun&quot;&gt; 工具&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;SimSun&quot;&gt;车站 / 车次 / 票价&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="860" y="775" width="170" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="tool-flight" value="&lt;font face=&quot;Times New Roman&quot;&gt;fast_flights&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;Times New Roman&quot;&gt;Google Flights&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontFamily=Times New Roman;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="1085" y="775" width="155" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="tool-budget" value="&lt;font face=&quot;SimSun&quot;&gt;预算计算工具&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontFamily=SimSun;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="1295" y="775" width="145" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="sqlite" value="&lt;font face=&quot;Times New Roman&quot;&gt;SQLite&lt;/font&gt;&lt;font face=&quot;SimSun&quot;&gt; 数据库&lt;/font&gt;&lt;br&gt;&lt;font face=&quot;SimSun&quot;&gt;历史计划存储&lt;/font&gt;" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="1360" y="862" width="105" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="arrow-client-api" value="&lt;font face=&quot;SimSun&quot;&gt;请求 / 响应&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#333333;fontFamily=SimSun;fontSize=10.5;" edge="1" parent="1" source="vue" target="fastapi">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow-api-workflow" value="&lt;font face=&quot;SimSun&quot;&gt;启动工作流&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#333333;fontFamily=SimSun;fontSize=10.5;" edge="1" parent="1" source="api-validate" target="workflow-box">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow-workflow-tools" value="&lt;font face=&quot;SimSun&quot;&gt;工具调用 / 数据读写&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#333333;fontFamily=SimSun;fontSize=10.5;" edge="1" parent="1" source="workflow-box" target="tool-rail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow-history-db" value="&lt;font face=&quot;SimSun&quot;&gt;历史计划&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#9673A6;fontFamily=SimSun;fontSize=10.5;" edge="1" parent="1" source="api-history" target="sqlite">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

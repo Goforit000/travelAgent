@@ -1,0 +1,233 @@
+<mxfile host="app.diagrams.net" modified="2026-05-16T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="trip-generation-activity" name="旅游计划生成活动图">
+    <mxGraphModel dx="1500" dy="1980" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="1980" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="旅游计划生成活动图" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=28;fontStyle=1;fontColor=#0f172a;" vertex="1" parent="1">
+          <mxGeometry x="500" y="30" width="500" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="subtitle" value="基于多智能体协同的个性化旅游规划系统" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#64748b;" vertex="1" parent="1">
+          <mxGeometry x="500" y="70" width="500" height="30" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="lane_user" value="用户" style="swimlane;html=1;startSize=46;horizontal=1;rounded=1;whiteSpace=wrap;fillColor=#eff6ff;strokeColor=#93c5fd;fontSize=16;fontStyle=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="130" width="260" height="1660" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane_frontend" value="前端系统" style="swimlane;html=1;startSize=46;horizontal=1;rounded=1;whiteSpace=wrap;fillColor=#f0fdf4;strokeColor=#86efac;fontSize=16;fontStyle=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="320" y="130" width="260" height="1660" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane_backend" value="后端工作流" style="swimlane;html=1;startSize=46;horizontal=1;rounded=1;whiteSpace=wrap;fillColor=#fff7ed;strokeColor=#fdba74;fontSize=16;fontStyle=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="580" y="130" width="260" height="1660" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane_collect" value="数据收集智能体" style="swimlane;html=1;startSize=46;horizontal=1;rounded=1;whiteSpace=wrap;fillColor=#f5f3ff;strokeColor=#c4b5fd;fontSize=16;fontStyle=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="840" y="130" width="260" height="1660" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane_plan" value="规划与校验智能体" style="swimlane;html=1;startSize=46;horizontal=1;rounded=1;whiteSpace=wrap;fillColor=#fdf2f8;strokeColor=#f9a8d4;fontSize=16;fontStyle=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="130" width="340" height="1660" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="start" value="" style="ellipse;html=1;shape=ellipse;fillColor=#111827;strokeColor=#111827;" vertex="1" parent="lane_user">
+          <mxGeometry x="118" y="95" width="24" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="fill_info" value="填写旅行信息&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;目的地、出发地、日期、人数、预算与偏好&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=14;arcSize=12;" vertex="1" parent="lane_user">
+          <mxGeometry x="40" y="165" width="180" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="submit" value="提交生成请求" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=14;arcSize=12;" vertex="1" parent="lane_user">
+          <mxGeometry x="40" y="300" width="180" height="56" as="geometry"/>
+        </mxCell>
+        <mxCell id="view_plan" value="查看旅游计划" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=14;arcSize=12;" vertex="1" parent="lane_user">
+          <mxGeometry x="40" y="1510" width="180" height="56" as="geometry"/>
+        </mxCell>
+        <mxCell id="end_outer" value="" style="ellipse;html=1;shape=doubleEllipse;fillColor=#ffffff;strokeColor=#111827;strokeWidth=2;" vertex="1" parent="lane_user">
+          <mxGeometry x="111" y="1625" width="38" height="38" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="validate_form" value="校验表单输入" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#16a34a;fontSize=14;arcSize=12;" vertex="1" parent="lane_frontend">
+          <mxGeometry x="40" y="430" width="180" height="56" as="geometry"/>
+        </mxCell>
+        <mxCell id="form_valid" value="表单是否合法？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#f97316;fontSize=14;" vertex="1" parent="lane_frontend">
+          <mxGeometry x="72" y="545" width="116" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="send_request" value="发送生成请求" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#16a34a;fontSize=14;arcSize=12;" vertex="1" parent="lane_frontend">
+          <mxGeometry x="40" y="705" width="180" height="56" as="geometry"/>
+        </mxCell>
+        <mxCell id="sse_progress" value="接收 SSE 事件&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;实时显示 Agent 状态和整体进度&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#16a34a;fontSize=14;arcSize=12;" vertex="1" parent="lane_frontend">
+          <mxGeometry x="40" y="940" width="180" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="show_result" value="接收最终结果&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;展示行程、地图、预算与交通信息&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#16a34a;fontSize=14;arcSize=12;" vertex="1" parent="lane_frontend">
+          <mxGeometry x="40" y="1425" width="180" height="76" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="receive_request" value="接收请求&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;构造 TripState，启动 LangGraph&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ea580c;fontSize=14;arcSize=12;" vertex="1" parent="lane_backend">
+          <mxGeometry x="40" y="810" width="180" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="fork_bar" value="" style="shape=line;html=1;strokeWidth=8;strokeColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="635" y="1030" width="700" height="10" as="geometry"/>
+        </mxCell>
+        <mxCell id="fork_label" value="Fork：并行数据收集" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=13;fontStyle=1;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="650" y="1000" width="180" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="join_bar" value="" style="shape=line;html=1;strokeWidth=8;strokeColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="635" y="1270" width="700" height="10" as="geometry"/>
+        </mxCell>
+        <mxCell id="join_label" value="Join：基础数据收集完成" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=13;fontStyle=1;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="650" y="1240" width="210" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="merge_data" value="汇总多源数据" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ea580c;fontSize=14;arcSize=12;" vertex="1" parent="lane_backend">
+          <mxGeometry x="40" y="1200" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="has_error" value="是否存在异常&lt;br&gt;或空数据？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#f97316;fontSize=14;" vertex="1" parent="lane_backend">
+          <mxGeometry x="65" y="1315" width="130" height="112" as="geometry"/>
+        </mxCell>
+        <mxCell id="retry_or_fallback" value="重试失败 Agent&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;或降级补全&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ea580c;fontSize=14;arcSize=12;" vertex="1" parent="lane_backend">
+          <mxGeometry x="40" y="1460" width="180" height="72" as="geometry"/>
+        </mxCell>
+        <mxCell id="finalize" value="finalize 解析&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;保存历史记录，返回 TripPlan&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ea580c;fontSize=14;arcSize=12;" vertex="1" parent="lane_backend">
+          <mxGeometry x="40" y="1585" width="180" height="76" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="poi" value="POI Agent 搜索景点" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7c3aed;fontSize=14;arcSize=12;" vertex="1" parent="lane_collect">
+          <mxGeometry x="36" y="960" width="188" height="54" as="geometry"/>
+        </mxCell>
+        <mxCell id="weather" value="Weather Agent 查天气" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7c3aed;fontSize=14;arcSize=12;" vertex="1" parent="lane_collect">
+          <mxGeometry x="36" y="1035" width="188" height="54" as="geometry"/>
+        </mxCell>
+        <mxCell id="hotel" value="Hotel Agent 搜酒店" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7c3aed;fontSize=14;arcSize=12;" vertex="1" parent="lane_collect">
+          <mxGeometry x="36" y="1110" width="188" height="54" as="geometry"/>
+        </mxCell>
+        <mxCell id="has_origin" value="是否填写出发地？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#f97316;fontSize=14;" vertex="1" parent="lane_collect">
+          <mxGeometry x="61" y="1200" width="138" height="112" as="geometry"/>
+        </mxCell>
+        <mxCell id="transport" value="Transport Agent&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;查询自驾、高铁或航班信息&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7c3aed;fontSize=14;arcSize=12;" vertex="1" parent="lane_collect">
+          <mxGeometry x="36" y="1360" width="188" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="skip_transport" value="跳过交通规划" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7c3aed;fontSize=14;arcSize=12;" vertex="1" parent="lane_collect">
+          <mxGeometry x="36" y="1465" width="188" height="54" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="planner" value="Planner Agent&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;综合多源数据生成结构化行程&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#db2777;fontSize=14;arcSize=12;" vertex="1" parent="lane_plan">
+          <mxGeometry x="65" y="1315" width="210" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="budget" value="Budget Agent&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;计算预算并校验是否超出人均预算&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#db2777;fontSize=14;arcSize=12;" vertex="1" parent="lane_plan">
+          <mxGeometry x="65" y="1435" width="210" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="over_budget" value="预算是否超限？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#f97316;fontSize=14;" vertex="1" parent="lane_plan">
+          <mxGeometry x="70" y="1560" width="200" height="116" as="geometry"/>
+        </mxCell>
+        <mxCell id="saving_suggestion" value="生成修改建议&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;返回 Planner 重规划&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#db2777;fontSize=14;arcSize=12;" vertex="1" parent="lane_plan">
+          <mxGeometry x="65" y="1710" width="210" height="72" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="note" value="注：该活动图展示需求阶段的粗粒度业务活动，重点体现并行数据收集、条件线程、异常处理和 Planner-Budget 预算反馈循环。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#cbd5e1;fontSize=13;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="100" y="1840" width="1300" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="lane_user" source="start" target="fill_info">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="lane_user" source="fill_info" target="submit">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="submit" target="validate_form">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="lane_frontend" source="validate_form" target="form_valid">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e5" value="[合法]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#b45309;fontStyle=1;" edge="1" parent="lane_frontend" source="form_valid" target="send_request">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" value="[不合法]" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#b45309;fontStyle=1;" edge="1" parent="1" source="form_valid" target="fill_info">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="send_request" target="receive_request">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="receive_request" target="fork_bar">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_sse" value="持续推送进度事件" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;dashed=1;dashPattern=6 4;strokeColor=#64748b;strokeWidth=1.5;fontColor=#64748b;" edge="1" parent="1" source="receive_request" target="sse_progress">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="fork_bar" target="poi">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="fork_bar" target="weather">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="fork_bar" target="hotel">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="fork_bar" target="has_origin">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e13" value="[已填写]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#b45309;fontStyle=1;" edge="1" parent="lane_collect" source="has_origin" target="transport">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e14" value="[未填写]" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#b45309;fontStyle=1;" edge="1" parent="lane_collect" source="has_origin" target="skip_transport">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="poi" target="join_bar">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="weather" target="join_bar">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="hotel" target="join_bar">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e18" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="transport" target="join_bar">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="skip_transport" target="join_bar">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e20" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="join_bar" target="merge_data">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e21" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="lane_backend" source="merge_data" target="has_error">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e22" value="[是]" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#b45309;fontStyle=1;" edge="1" parent="lane_backend" source="has_error" target="retry_or_fallback">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e23" value="[否]" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#b45309;fontStyle=1;" edge="1" parent="1" source="has_error" target="planner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e24" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="retry_or_fallback" target="planner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e25" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="lane_plan" source="planner" target="budget">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e26" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="lane_plan" source="budget" target="over_budget">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e27" value="[未超限]" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#b45309;fontStyle=1;" edge="1" parent="1" source="over_budget" target="finalize">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e28" value="[超限且达到上限]" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#b45309;fontStyle=1;" edge="1" parent="1" source="over_budget" target="finalize">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e29" value="[超限且次数 &lt; 上限]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#b45309;fontStyle=1;" edge="1" parent="lane_plan" source="over_budget" target="saving_suggestion">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e30" value="重规划" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;fontColor=#64748b;" edge="1" parent="lane_plan" source="saving_suggestion" target="planner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e31" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="finalize" target="show_result">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e32" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="1" source="show_result" target="view_plan">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e33" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#475569;strokeWidth=2;" edge="1" parent="lane_user" source="view_plan" target="end_outer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

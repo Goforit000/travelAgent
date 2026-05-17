@@ -78,8 +78,14 @@ def data_collection_node(state: TripState) -> dict:
     - 初次失败或返回空 → 自动重试 1 次（调用单 Agent 节点函数）
     - 重试仍失败/空 → 交由 Planner LLM 常识补全
     """
+    # 出发地为空 → 跳过 Transport Agent
+    request = state.get("request")
+    departure_city = getattr(request, "departure_city", None) if request else None
+    skip_transport = not departure_city
+    agent_list = "POI + Weather + Hotel" + ("" if skip_transport else " + Transport")
+
     print(f"\n{'=' * 60}")
-    print(f"📦 [data_collection_node] 并行数据收集开始 (POI + Weather + Hotel + Transport)")
+    print(f"📦 [data_collection_node] 并行数据收集开始 ({agent_list})")
     print(f"{'=' * 60}")
 
     results: dict = {
@@ -125,13 +131,15 @@ def data_collection_node(state: TripState) -> dict:
             return {"error": f"Transport Agent: {e}", "agent_outputs": {"transport_agent": f"失败: {e}"}}
 
     round1_results: dict[str, dict] = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    worker_count = 3 if skip_transport else 4
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = {
             executor.submit(run_poi): "poi",
             executor.submit(run_weather): "weather",
             executor.submit(run_hotel): "hotel",
-            executor.submit(run_transport): "transport",
         }
+        if not skip_transport:
+            futures[executor.submit(run_transport)] = "transport"
         for future in as_completed(futures):
             agent_name = futures[future]
             try:
@@ -141,8 +149,9 @@ def data_collection_node(state: TripState) -> dict:
                 round1_results[agent_name] = {"error": f"{agent_name}: {e}"}
 
     # 合并第一轮结果 + 记录需要重试的 Agent
+    agent_names = ["poi", "weather", "hotel"] if skip_transport else ["poi", "weather", "hotel", "transport"]
     retry_agents: list[str] = []
-    for agent_name in ["poi", "weather", "hotel", "transport"]:
+    for agent_name in agent_names:
         agent_result = round1_results.get(agent_name, {})
         if "agent_outputs" in agent_result:
             results["agent_outputs"].update(agent_result["agent_outputs"])
@@ -175,8 +184,9 @@ def data_collection_node(state: TripState) -> dict:
         "poi": (poi_node, "raw_attractions"),
         "weather": (weather_node, "raw_weather"),
         "hotel": (hotel_node, "raw_hotels"),
-        "transport": (transport_node, "raw_intercity_transport"),
     }
+    if not skip_transport:
+        retry_map["transport"] = (transport_node, "raw_intercity_transport")
     errors: list[str] = []
     for agent_name in retry_agents:
         print(f"  🔄 重试 {agent_name}...")
@@ -203,9 +213,12 @@ def data_collection_node(state: TripState) -> dict:
     total_attractions = len(results["raw_attractions"])
     total_hotels = len(results["raw_hotels"])
     total_weather = len(results["raw_weather"])
-    total_transport = 1 if results.get("raw_intercity_transport") else 0
+    if skip_transport:
+        transport_summary = "已跳过（未填出发地）"
+    else:
+        transport_summary = f"{1 if results.get('raw_intercity_transport') else 0} 个跨城交通方案"
 
-    print(f"  📊 收集汇总: {total_attractions} 景点, {total_weather} 天天气, {total_hotels} 酒店, {total_transport} 个跨城交通方案")
+    print(f"  📊 收集汇总: {total_attractions} 景点, {total_weather} 天天气, {total_hotels} 酒店, {transport_summary}")
     print(f"{'=' * 60}\n")
 
     return results

@@ -2,8 +2,8 @@
 高德地图工具 — 封装高德地图 Web API，同时提供底层函数和 @tool 装饰的 Agent 工具
 
 底层函数（供代码直接调用）：
-- search_pois()  : 关键词搜索 POI
-- get_weather()  : 查询城市天气预报
+- search_pois()        : 关键词搜索 POI
+- get_weather()        : 查询城市天气预报
 
 @tool 装饰的工具（供 Agent ReAct 循环中的 LLM Tool Calling 调用）：
 - search_attractions_tool : 搜索景点

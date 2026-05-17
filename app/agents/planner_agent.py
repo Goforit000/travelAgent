@@ -4,62 +4,61 @@ Planner Agent — 负责综合所有数据，生成完整的结构化旅行计�
 设计思路：
 1. 单次 LLM 调用完成规划 — prompt 包含完整 JSON schema + 格式化数据 + 任务要求
 2. 数据用编号文本格式传递（非 json.dumps），大幅减少 token 消耗
-3. 景点按空间距离贪心聚类分组，区域数 ≈ travel_days，同天景点不跨区
-4. prompt 内联完整 JSON 模板，LLM 明确知道每个必填字段
-5. 括号计数法精确提取嵌套 JSON
+3. 算法逻辑（聚类、酒店匹配、格式化）已抽离至 app.utils.planner_utils
+4. 括号计数法精确提取嵌套 JSON
 """
 
 import json
-from datetime import datetime, timedelta
+from typing import Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.agents.base import BaseAgent
 from app.graph.state import TripState
 from app.tools.llm import get_chat_model, PLANNER_MAX_TOKENS, PLANNER_REQUEST_TIMEOUT
+from app.utils.planner_utils import (
+    format_attractions,
+    format_weather,
+    format_intercity_transport,
+    mode_label,
+)
 
 
-PLANNER_SYSTEM_PROMPT = """你是一个专业的旅行规划师。
+PLANNER_SYSTEM_PROMPT = """你是一个专业的旅行规划师。根据以下信息生成详细的旅行计划。
 
-根据以下信息，生成一份详细的旅行计划。
+## 景点与酒店
+- 每天从同一区域分组（"### 区域名"）中选 2-4 个景点，使用景点列表中提供的真实坐标，禁止跨区选景点
+- 每天酒店从当天景点区域的"附近酒店"列表中选取，不同区域的天必须选不同酒店
+- 每天三餐各一（早/午/晚），生成合理的预算估算
 
-## 任务要求
-1. 从可用景点中选择合适的景点，每天安排 2-4 个
-2. 使用景点列表中提供的真实坐标
-3. 为每天安排早餐、午餐、晚餐（各一餐）
-4. 每天的酒店从当天景点区域下的"附近酒店"中选取。
-   不同区域的天必须选不同的酒店（即使房价相近）。
-5. 生成合理的预算估算
-6. 每天的景点必须来自同一区域分组（同一"### 区域名"下的景点）。
-   不要跨区域选景点。景点已按空间距离分组并附带了附近酒店列表。
-7. 出发地到目的地的往返交通规则
-1）必须读取用户提供的出发地和跨城往返交通方式。
-2）必须保留 Transport Agent 给出的 intercity_transport 结构，不得擅自修改用户选择的跨城交通方式。
-3）第一天行程必须根据去程到达时间安排：
-   a) 到达时间早于 10:00 → 可安排全天 3-4 个景点。
-   b) 到达时间在 10:00-14:00 → 只安排下午 1-2 个景点，不要安排上午景点。
-   c) 到达时间晚于 14:00 → 只安排傍晚 1 个景点或自由活动，首日 description 写明"抵达日"。
-4）最后一天行程必须根据返程出发时间安排：
-   a) 出发时间晚于 18:00 → 可安排全天 2-3 个景点。
-   b) 出发时间在 14:00-18:00 → 只安排上午/中午 1-2 个景点，且景点须靠近出发站/机场。
-   c) 出发时间早于 14:00 → 只安排 1 个近处景点或不安排，末日 description 写明"返程日"。
-5）不得把往返交通费用混入 budget.total_transportation。
-6）budget.total_transportation 只表示目的地城市内交通费用，budget.total_intercity_transport 表示出发地到目的地往返交通费用。
-8. 出行人数与预算规则
-1）必须读取用户提供的出行人数，并在行程安排中考虑多人出行的舒适度，不安排过密路线。
-2）你只负责生成可核算的基础单价，不能把费用乘以出行人数、房间数或车辆数。
-3） attractions[].ticket_price 必须是单人票价。
-4） meals[].estimated_cost 必须是单人单餐费用。
-5） hotel.estimated_cost 必须是每间每晚费用。
-6） budget.total_transportation 必须是目的地城市内全程交通单价：非自驾为每人这些天费用，自驾为每辆车这些天费用
-7） budget.total_intercity_transport 必须来自 intercity_transport.total_cost，表示跨城往返交通团队总费用
-9. 室内备用计划规则
-1）无论天气是否下雨，都必须在 TripPlan 顶层生成 indoor_backup_attractions。
-2）整个行程总共生成 2-3 个室内备用景点，不是每天生成。
-3）室内备用景点必须是博物馆、美术馆、科技馆、展览馆、室内文化场馆、大型商场、书店、室内市集等室内场所。
-4）室内备用景点不能和任意一天 days[].attractions 中的正式景点重名。
-5）室内备用景点不需要 image_url，不参与预算、地图路线和每日正式行程。
-6）如果可用 POI 不足，允许根据城市常识补全室内备用景点。
+## 跨城交通
+- 用户未填写出发地，intercity_transport 必须设为 null
+- 无需遵守首末日到达/出发时间约束，每天正常安排景点即可
 
-请严格按照以下 JSON 格式输出，不要添加任何其他内容，不要用 markdown 代码块:
+## 首末日时间约束（有出发地时必须遵守）
+根据去程到达时间安排第一天：
+  - 早于 10:00 → 全天 3-4 个景点
+  - 10:00-14:00 → 仅下午 1-2 个景点，不安排上午景点
+  - 晚于 14:00 → 傍晚 1 个景点或自由活动，首日 description 写"抵达日"
+根据返程出发时间安排最后一天：
+  - 晚于 18:00 → 全天 2-3 个景点
+  - 14:00-18:00 → 上午/中午 1-2 个景点，须靠近出发站/机场
+  - 早于 14:00 → 1 个近处景点或不安排，末日 description 写"返程日"
+- 必须保留 Transport Agent 的 intercity_transport 结构，不得修改跨城交通方式
+- budget.total_transportation = 城市内交通费用，budget.total_intercity_transport = 跨城往返交通费用，不得混淆
+
+## 预算核算（单价制）
+- 所有费用填基础单价，禁止乘以出行人数/房间数/车辆数
+- ticket_price = 单人票价，meals[].estimated_cost = 单人单餐，hotel.estimated_cost = 每间每晚
+- budget.total_transportation = 城市内全程交通单价（非自驾=每人这些天费用，自驾=每车这些天费用）
+- budget.total_intercity_transport = intercity_transport.total_cost（跨城往返团队总费用）
+- 考虑出行人数，不安排过密路线
+
+## 室内备用计划
+- 顶层 indoor_backup_attractions 必须生成，整个行程共 2-3 个（不是每天）
+- 限博物馆/美术馆/科技馆/展览馆/商场/书店/室内市集等室内场所
+- 不能和正式景点重名，不参与预算和路线，不需要 image_url
+- 可用 POI 不足时可根据城市常识补全
+
+严格按以下 JSON 格式输出，禁止 markdown 代码块和额外文字：
 
 {
   "city": "城市名称",
@@ -161,7 +160,7 @@ PLANNER_SYSTEM_PROMPT = """你是一个专业的旅行规划师。
     "total": 0
   }
 }
-重要：每个字段都必须填写，禁止省略。禁止将嵌套对象简化为字符串或数字。"""
+每个字段必填，禁止省略或将嵌套对象简化为字符串或数字。"""
 
 
 class PlannerAgent(BaseAgent):
@@ -189,7 +188,21 @@ class PlannerAgent(BaseAgent):
     def request_timeout(self) -> int:
         return PLANNER_REQUEST_TIMEOUT
 
-    # ===== 覆盖 run()：单次 LLM 调用 =====
+    # ===== OVERSHOOT 解析（_build_human_message 和 _get_revision_prompt 共用）=====
+
+    def _parse_overshoot_payload(self, state: TripState) -> Optional[dict]:
+        """从 state 中解析 Budget Agent 的 OVERSHOOT 反馈负载"""
+        agent_outputs = state.get("agent_outputs", {})
+        budget_value = agent_outputs.get("budget_agent", "")
+        if not isinstance(budget_value, str) or not budget_value.startswith("OVERSHOOT|"):
+            return None
+        try:
+            payload_json = budget_value.split("|", 1)[1]
+            return json.loads(payload_json)
+        except Exception:
+            return None
+
+    # ===== 核心执行 =====
 
     def run(self, state: TripState) -> dict:
         request = state.get("request")
@@ -204,7 +217,7 @@ class PlannerAgent(BaseAgent):
         is_revision = (phase == "review")
 
         if is_revision:
-            system_prompt = _get_revision_prompt(state)
+            system_prompt = _get_revision_prompt(state, self._parse_overshoot_payload(state))
         else:
             system_prompt = self.system_prompt
 
@@ -270,9 +283,9 @@ class PlannerAgent(BaseAgent):
         raw_hotels = state.get("raw_hotels", [])
         raw_intercity_transport = state.get("raw_intercity_transport", {})
 
-        pois_info = _format_attractions(raw_attractions, travel_days, raw_hotels)
-        weather_info = _format_weather(raw_weather, travel_days)
-        intercity_info = _format_intercity_transport(raw_intercity_transport)
+        pois_info = format_attractions(raw_attractions, travel_days, raw_hotels)
+        weather_info = format_weather(raw_weather, travel_days)
+        intercity_info = format_intercity_transport(raw_intercity_transport)
 
         prompt = f"""## 基本信息
 - 出发地城市: {departure_city if departure_city else '未填写'}
@@ -280,7 +293,7 @@ class PlannerAgent(BaseAgent):
 - 日期范围: {start_date} 至 {end_date}
 - 旅行天数: {travel_days} 天
 - 出行人数: {people_count} 人
-- 往返交通方式: {_mode_label(intercity_mode)}（用户指定，禁止擅自更改）
+- 往返交通方式: {mode_label(intercity_mode)}（用户指定，禁止擅自更改）
 - 交通方式: {transportation}
 - 住宿偏好: {accommodation}
 - 用户偏好: {', '.join(preferences) if preferences else '无特殊偏好'}"""
@@ -303,36 +316,32 @@ class PlannerAgent(BaseAgent):
         phase = state.get("phase", "")
         if phase == "review":
             raw_plan_text = state.get("raw_plan_text", "")
-            agent_outputs = state.get("agent_outputs", {})
-            budget_value = agent_outputs.get("budget_agent", "")
             revision_round = state.get("revision_round", 0)
+            payload = self._parse_overshoot_payload(state)
 
             budget_info_text = ""
-            if isinstance(budget_value, str) and budget_value.startswith("OVERSHOOT|"):
-                try:
-                    payload_json = budget_value.split("|", 1)[1]
-                    payload = json.loads(payload_json)
-                    target = payload.get("target_budget_total", payload.get("target_budget", 0))
-                    per_person = payload.get("target_budget_per_person", 0)
-                    people = payload.get("people_count", people_count)
-                    overshoot = payload.get("overshoot_amount", 0)
-                    suggestions = payload.get("savings_suggestions", [])
-                    print(f"budget的建议：{suggestions}")
-                    budget_info_text = f"\n## 预算约束（第 {revision_round + 1} 次修正）\n"
-                    budget_info_text += f"- 目标总预算上限: {target} 元（必须严格遵守）\n"
-                    budget_info_text += f"- 出行人数: {people} 人；人均预算上限: {per_person} 元\n"
-                    budget_info_text += f"- 当前超支金额: {overshoot} 元\n"
-                    budget_info_text += f"- 已修正轮数: {revision_round}\n"
-                    budget_info_text += f"\n### Budget Agent 的削减建议（按此执行）:\n"
-                    for s in suggestions:
-                        cat = s.get("category", "")
-                        curr = s.get("current", 0)
-                        suggested = s.get("suggested", 0)
-                        saving = s.get("saving", 0)
-                        desc = s.get("description", "")
-                        budget_info_text += f"- [{cat}] {curr}元 → {suggested}元（节省 {saving}元）: {desc}\n"
-                except Exception:
-                    budget_info_text = f"\n## 预算约束\n目标预算: 请参考 Budget Agent 的建议削减费用。\n"
+            if payload:
+                target = payload.get("target_budget_total", payload.get("target_budget", 0))
+                per_person = payload.get("target_budget_per_person", 0)
+                people = payload.get("people_count", people_count)
+                overshoot = payload.get("overshoot_amount", 0)
+                suggestions = payload.get("savings_suggestions", [])
+                print(f"budget的建议：{suggestions}")
+                budget_info_text = f"\n## 预算约束（第 {revision_round + 1} 次修正）\n"
+                budget_info_text += f"- 目标总预算上限: {target} 元（必须严格遵守）\n"
+                budget_info_text += f"- 出行人数: {people} 人；人均预算上限: {per_person} 元\n"
+                budget_info_text += f"- 当前超支金额: {overshoot} 元\n"
+                budget_info_text += f"- 已修正轮数: {revision_round}\n"
+                budget_info_text += f"\n### Budget Agent 的削减建议（按此执行）:\n"
+                for s in suggestions:
+                    cat = s.get("category", "")
+                    curr = s.get("current", 0)
+                    suggested = s.get("suggested", 0)
+                    saving = s.get("saving", 0)
+                    desc = s.get("description", "")
+                    budget_info_text += f"- [{cat}] {curr}元 → {suggested}元（节省 {saving}元）: {desc}\n"
+            else:
+                budget_info_text = f"\n## 预算约束\n目标预算: 请参考 Budget Agent 的建议削减费用。\n"
 
             prompt += f"""
 
@@ -344,328 +353,25 @@ class PlannerAgent(BaseAgent):
 
 
 # ============================================================
-# 数据格式化函数
+# 模块级辅助函数
 # ============================================================
 
-def _format_attractions(attractions: list[dict], travel_days: int, hotels: list[dict] | None = None) -> str:
-    """格式化景点为按区域分组的编号文本 — 每区附加最近的酒店，LLM 直接在本区内选择"""
-    if not attractions:
-        return "暂无景点信息，请根据常识为城市生成合适的景点。"
-
-    clusters = _greedy_cluster(attractions, target_clusters=max(1, travel_days))
-    print(f"  [planner_agent] 贪心聚类: {len(attractions)} 个景点 → {len(clusters)} 个区域")
-
-    # 为每个 cluster 挂载最近的酒店
-    if hotels:
-        for cluster in clusters:
-            cluster["hotels"] = _find_nearest_hotels(cluster, hotels, top_n=3)
-        hotel_count = sum(len(c.get("hotels", [])) for c in clusters)
-        print(f"  [planner_agent] 酒店挂载: {len(hotels)} 个酒店 → {hotel_count} 个分配")
-
-    lines: list[str] = []
-    global_index = 0
-    for cluster in clusters:
-        name = cluster["name"]
-        items = cluster["items"]
-        nearby_hotels = cluster.get("hotels", [])
-        hotel_count_str = f" + {len(nearby_hotels)} 家附近酒店" if nearby_hotels else ""
-
-        if len(clusters) > 1:
-            lines.append(f"### {name}（{len(items)} 个景点{hotel_count_str}）")
-        else:
-            lines.append(f"### 主要景点（{len(items)} 个景点{hotel_count_str}）")
-
-        for poi in items:
-            global_index += 1
-            poi_name = poi.get("name", "未知")
-            lng = poi.get("longitude", 0)
-            lat = poi.get("latitude", 0)
-            rating = poi.get("rating", 0)
-            address = poi.get("address", "")
-            ticket = poi.get("ticket_price", 0)
-            desc = poi.get("description", "")
-
-            lines.append(f"  {global_index}. {poi_name} | 坐标({lng}, {lat})")
-            if rating:
-                lines.append(f"     评分: {rating}")
-            if address:
-                lines.append(f"     地址: {address}")
-            if ticket:
-                lines.append(f"     门票: {ticket}元")
-            if desc:
-                lines.append(f"     简介: {desc}")
-
-        # 输出本区域附近酒店
-        if nearby_hotels:
-            lines.append(f"  附近酒店（供本区域选择）:")
-            for h in nearby_hotels:
-                hotel_name = h.get("name", "未知")
-                h_lng = h.get("longitude", 0)
-                h_lat = h.get("latitude", 0)
-                h_rating = h.get("rating", 0)
-                h_price = h.get("price_range", "")
-                h_type = h.get("type", "")
-                h_addr = h.get("address", "")
-                h_dist = h.get("_distance_km", 0)
-
-                lines.append(f"    - {hotel_name} | 坐标({h_lng}, {h_lat}) | 距区域中心 {h_dist:.1f}km")
-                if h_rating:
-                    lines.append(f"      评分: {h_rating}")
-                if h_price:
-                    lines.append(f"      价格: {h_price}")
-                if h_type:
-                    lines.append(f"      类型: {h_type}")
-                if h_addr:
-                    lines.append(f"      地址: {h_addr}")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def _find_nearest_hotels(cluster: dict, hotels: list[dict], top_n: int = 3) -> list[dict]:
-    """找到离 cluster 中心最近的 top_n 个酒店"""
-    import math
-
-    # 计算 cluster 中心
-    items = cluster["items"]
-    if not items:
-        return []
-    center_lng = sum(float(h.get("longitude", 0)) for h in items) / len(items)
-    center_lat = sum(float(h.get("latitude", 0)) for h in items) / len(items)
-
-    def dist_km(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
-        r = 6371.0
-        dlat = math.radians(lat2 - lat1)
-        dlng = math.radians(lng2 - lng1)
-        a = (math.sin(dlat / 2) ** 2 +
-             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-             math.sin(dlng / 2) ** 2)
-        return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    scored: list[dict] = []
-    for h in hotels:
-        h_lng = float(h.get("longitude", 0))
-        h_lat = float(h.get("latitude", 0))
-        if h_lng == 0 and h_lat == 0:
-            continue
-        d = dist_km(center_lng, center_lat, h_lng, h_lat)
-        entry = dict(h)
-        entry["_distance_km"] = d
-        scored.append(entry)
-
-    scored.sort(key=lambda x: x["_distance_km"])
-    return scored[:top_n]
-
-
-def _greedy_cluster(
-    attractions: list[dict],
-    target_clusters: int = 3,
-    min_threshold_km: float = 2.0,
-    max_threshold_km: float = 15.0,
-) -> list[dict]:
-    """
-    贪心空间聚类：将景点按地理位置分组，区域数 ≈ travel_days
-
-    算法：遍历景点，计算与各 cluster 中心距离，
-    < threshold → 加入最近 cluster，≥ threshold → 新建 cluster。
-    如果 cluster 数 > target_clusters，逐步增大 threshold 合并。
-    """
-    import math
-
-    if not attractions:
-        return [{"name": "默认区域", "items": []}]
-
-    def dist_km(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
-        r = 6371.0
-        dlat = math.radians(lat2 - lat1)
-        dlng = math.radians(lng2 - lng1)
-        a = (math.sin(dlat / 2) ** 2 +
-             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-             math.sin(dlng / 2) ** 2)
-        return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    threshold = min_threshold_km
-    clusters: list[dict] = []
-
-    while threshold <= max_threshold_km:
-        clusters = []
-        for attr in attractions:
-            lng = float(attr.get("longitude", 0))
-            lat = float(attr.get("latitude", 0))
-            if lng == 0 and lat == 0:
-                continue
-
-            best_idx = -1
-            best_dist = float("inf")
-            for idx, c in enumerate(clusters):
-                d = dist_km(lng, lat, c["center_lng"], c["center_lat"])
-                if d < best_dist:
-                    best_dist = d
-                    best_idx = idx
-
-            if best_idx >= 0 and best_dist < threshold:
-                c = clusters[best_idx]
-                c["items"].append(attr)
-                n = len(c["items"])
-                c["center_lng"] = (c["center_lng"] * (n - 1) + lng) / n
-                c["center_lat"] = (c["center_lat"] * (n - 1) + lat) / n
-            else:
-                clusters.append({
-                    "center_lng": lng,
-                    "center_lat": lat,
-                    "items": [attr],
-                })
-
-        if len(clusters) <= target_clusters:
-            break
-        threshold += 2.0
-
-    # 命名：取 cluster 内评分最高的景点名 + "及周边"
-    for c in clusters:
-        items = c["items"]
-        if items:
-            best = max(items, key=lambda x: (
-                float(x.get("rating", 0)) if isinstance(x.get("rating"), (int, float))
-                else (float(str(x.get("rating", "0")))
-                      if str(x.get("rating", "")).replace(".", "", 1).replace("-", "", 1).isdigit()
-                      else 0)
-            ))
-            c["name"] = best.get("name", "未知") + "及周边"
-        else:
-            c["name"] = "无景点"
-        del c["center_lng"], c["center_lat"]
-
-    clusters.sort(key=lambda c: len(c["items"]), reverse=True)
-    return clusters
-
-
-def _format_weather(weather: list[dict], travel_days: int) -> str:
-    if not weather:
-        return "暂无天气信息"
-
-    lines = []
-    for w in weather[:travel_days]:
-        date = w.get("date", "")
-        day_w = w.get("day_weather", "")
-        night_w = w.get("night_weather", "")
-        day_t = str(w.get("day_temp", "0")).replace("°C", "").replace("℃", "").replace("°", "").strip()
-        night_t = str(w.get("night_temp", "0")).replace("°C", "").replace("℃", "").replace("°", "").strip()
-        wind_d = w.get("wind_direction", "")
-        wind_p = w.get("wind_power", "")
-
-        lines.append(f"{date}: {day_w} {day_t}°C / {night_w} {night_t}°C  {wind_d} {wind_p}")
-
-    return "\n".join(lines)
-
-
-def _mode_label(mode: str) -> str:
-    """跨城交通方式显示名"""
-    labels = {
-        "driving": "自驾",
-        "high_speed_rail": "高铁",
-        "flight": "飞机",
-    }
-    return labels.get(mode, mode or "未指定")
-
-
-def _format_intercity_transport(intercity_transport: dict) -> str:
-    """格式化跨城往返交通信息，明确标注首末日时间约束"""
-    if not isinstance(intercity_transport, dict) or not intercity_transport:
-        return "暂无跨城往返交通数据。如果用户未填写出发地，则 intercity_transport 可为 null。"
-
-    if not intercity_transport.get("outbound") or not intercity_transport.get("return_trip"):
-        summary = intercity_transport.get("summary", "暂无跨城往返交通数据")
-        warnings = intercity_transport.get("warnings", [])
-        warning_text = "；".join(warnings) if warnings else "无"
-        return f"{summary}\n警告: {warning_text}\n如果无有效去程/返程对象，intercity_transport 可为 null。"
-
-    # 提取关键时间约束
-    outbound = intercity_transport.get("outbound", {})
-    return_trip = intercity_transport.get("return_trip", {})
-    outbound_arrival = outbound.get("arrival_time", "未知")
-    return_departure = return_trip.get("departure_time", "未知")
-
-    time_hint = (
-        f"\n\n⚠️ 首末日时间约束（必须遵守）：\n"
-        f"- 去程到达时间: {outbound_arrival}，第一天行程从到达之后开始，到达当天不要安排到达时间之前的景点。\n"
-        f"- 返程出发时间: {return_departure}，最后一天行程必须在出发前结束，且最后一个景点须靠近出发站/机场。\n"
-    )
-
-    text = json.dumps(intercity_transport, ensure_ascii=False, indent=2)
-    return (
-        "以下是 Transport Agent 生成的结构化往返交通数据。"
-        "请原样保留字段结构和用户选择的 mode，并写入最终 JSON 的 intercity_transport。"
-        f"{time_hint}\n"
-        f"{text}"
-    )
-
-
-def _format_hotels(hotels: list[dict]) -> str:
-    if not hotels:
-        return "暂无酒店信息，请根据常识推荐合适的酒店。"
-
-    # 按空间聚类分组，与景点区域格式一致（LLM 可据此为每天选对应区域的酒店）
-    clusters = _greedy_cluster(hotels, target_clusters=min(len(hotels), 3), min_threshold_km=2.0, max_threshold_km=5.0)
-    print(f"  [planner_agent] 酒店聚类: {len(hotels)} 个酒店 → {len(clusters)} 个区域")
-
-    lines: list[str] = []
-    for cluster in clusters:
-        name = cluster["name"]
-        items = cluster["items"]
-        if len(clusters) > 1:
-            lines.append(f"### {name}（{len(items)} 个酒店）")
-        else:
-            lines.append(f"### 酒店（{len(items)} 个）")
-
-        for h in items:
-            hotel_name = h.get("name", "未知")
-            address = h.get("address", "")
-            rating = h.get("rating", 0)
-            price = h.get("price_range", "")
-            htype = h.get("type", "")
-            lng = h.get("longitude", 0)
-            lat = h.get("latitude", 0)
-
-            lines.append(f"  - {hotel_name} | 坐标({lng}, {lat})")
-            if rating:
-                lines.append(f"    评分: {rating}")
-            if price:
-                lines.append(f"    价格: {price}")
-            if htype:
-                lines.append(f"    类型: {htype}")
-            if address:
-                lines.append(f"    地址: {address}")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-# ============================================================
-# JSON 解析 + 修正 prompt
-# ============================================================
-
-def _get_revision_prompt(state: TripState) -> str:
-    agent_outputs = state.get("agent_outputs", {})
-    budget_value = agent_outputs.get("budget_agent", "")
+def _get_revision_prompt(state: TripState, payload: Optional[dict] = None) -> str:
+    """构造预算修正的系统提示词，payload 由 PlannerAgent._parse_overshoot_payload() 提供"""
     target_budget = 0
     target_budget_per_person = 0
     people_count = 1
     overshoot_amount = 0
     savings_text = ""
 
-    if isinstance(budget_value, str) and budget_value.startswith("OVERSHOOT|"):
-        try:
-            payload_json = budget_value.split("|", 1)[1]
-            payload = json.loads(payload_json)
-            target_budget = payload.get("target_budget_total", payload.get("target_budget", 0))
-            target_budget_per_person = payload.get("target_budget_per_person", 0)
-            people_count = payload.get("people_count", 1)
-            overshoot_amount = payload.get("overshoot_amount", 0)
-            suggestions = payload.get("savings_suggestions", [])
-            for s in suggestions:
-                savings_text += f"- {s.get('category', '')}: {s.get('description', '')}\n"
-        except Exception:
-            pass
+    if payload:
+        target_budget = payload.get("target_budget_total", payload.get("target_budget", 0))
+        target_budget_per_person = payload.get("target_budget_per_person", 0)
+        people_count = payload.get("people_count", 1)
+        overshoot_amount = payload.get("overshoot_amount", 0)
+        suggestions = payload.get("savings_suggestions", [])
+        for s in suggestions:
+            savings_text += f"- {s.get('category', '')}: {s.get('description', '')}\n"
 
     return f"""你是旅行规划师，正在根据预算反馈重新调整行程。
 

@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="980" viewBox="0 0 1500 980" role="img" aria-labelledby="title desc">
+  <title id="title">BaseAgent、ReActAgent、具体 Agent 与 Tool 关系图</title>
+  <desc id="desc">以左右分区和垂直泳道展示 BaseAgent、ReActAgent、具体 Agent 与 Tool 的关系，ReActAgent 内部包含思考、行动、观察循环。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#334155"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="inheritArrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="strokeWidth">
+      <path d="M 1 1 L 13 7 L 1 13 Z" fill="#ffffff" stroke="#334155" stroke-width="1.8"/>
+    </marker>
+    <style>
+      .bg { fill: #ffffff; }
+      .title { font: 700 34px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 500 17px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #475569; }
+      .lane-base { fill: #eff6ff; stroke: #bfdbfe; stroke-width: 2; rx: 18; }
+      .lane-react { fill: #faf5ff; stroke: #ddd6fe; stroke-width: 2; rx: 18; }
+      .lane-title { font: 700 23px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #1e293b; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 2.2; rx: 12; }
+      .base { fill: #dbeafe; stroke: #2563eb; stroke-width: 2.8; rx: 14; }
+      .react { fill: #f3e8ff; stroke: #7c3aed; stroke-width: 2.8; rx: 14; }
+      .agent-base { fill: #ffffff; stroke: #2563eb; stroke-width: 2.2; rx: 10; }
+      .agent-react { fill: #ffffff; stroke: #7c3aed; stroke-width: 2.2; rx: 10; }
+      .tool { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2.1; rx: 10; }
+      .cycle { fill: #ffffff; stroke: #9333ea; stroke-width: 2.1; rx: 999; }
+      .box-title { font: 700 20px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #0f172a; }
+      .box-text { font: 500 15px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #334155; }
+      .small { font: 500 14px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #475569; }
+      .label { font: 600 14px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #334155; }
+      .blue-label { font: 600 14px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #1d4ed8; }
+      .green-label { font: 600 14px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #15803d; }
+      .purple-label { font: 600 14px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #7e22ce; }
+      .line { fill: none; stroke: #334155; stroke-width: 2; marker-end: url(#arrow); }
+      .line-blue { fill: none; stroke: #2563eb; stroke-width: 2.1; marker-end: url(#arrowBlue); }
+      .line-green { fill: none; stroke: #16a34a; stroke-width: 2.1; marker-end: url(#arrowGreen); }
+      .line-dash { fill: none; stroke: #64748b; stroke-width: 2; stroke-dasharray: 8 6; marker-end: url(#arrow); }
+      .inherit { fill: none; stroke: #334155; stroke-width: 2.1; marker-end: url(#inheritArrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1500" height="980"/>
+  <text class="title" x="750" y="55" text-anchor="middle">BaseAgent、ReActAgent、具体 Agent 与 Tool 关系图</text>
+  <text class="subtitle" x="750" y="86" text-anchor="middle">采用左右分区与垂直泳道布局，避免跨区连线和框体交叉</text>
+
+  <!-- TripState note -->
+  <rect class="box" x="565" y="118" width="370" height="76"/>
+  <text class="box-title" x="750" y="148" text-anchor="middle">TripState</text>
+  <text class="box-text" x="750" y="174" text-anchor="middle">所有 Agent 读取状态，并将结果写回状态字段</text>
+
+  <!-- Two clean lanes -->
+  <rect class="lane-base" x="55" y="220" width="665" height="690"/>
+  <text class="lane-title" x="90" y="260">BaseAgent 体系</text>
+  <text class="small" x="90" y="288">适合任务流程明确、工具调用路径稳定的智能体</text>
+
+  <rect class="lane-react" x="780" y="220" width="665" height="690"/>
+  <text class="lane-title" x="815" y="260">ReActAgent 体系</text>
+  <text class="small" x="815" y="288">适合需要搜索、筛选、校验和补充信息的智能体</text>
+
+  <!-- Core classes -->
+  <rect class="base" x="185" y="325" width="405" height="120"/>
+  <text class="box-title" x="215" y="360">BaseAgent</text>
+  <text class="box-text" x="215" y="388">基础模型调用、状态读取、结果写入</text>
+  <text class="box-text" x="215" y="416">最小智能体基类</text>
+
+  <rect class="react" x="910" y="325" width="405" height="120"/>
+  <text class="box-title" x="940" y="360">ReActAgent</text>
+  <text class="box-text" x="940" y="388">继承 BaseAgent，增加多轮工具调用能力</text>
+  <text class="box-text" x="940" y="416">包含“思考 - 行动 - 观察”循环</text>
+
+  <path class="inherit" d="M 910 385 L 590 385"/>
+  <text class="label" x="750" y="366" text-anchor="middle">继承 / 扩展</text>
+
+  <!-- State lines, kept above lanes and non-crossing -->
+  <path class="line-dash" d="M 650 194 L 388 325"/>
+  <path class="line-dash" d="M 850 194 L 1112 325"/>
+  <text class="label" x="575" y="245">读写状态</text>
+  <text class="label" x="880" y="245">读写状态</text>
+
+  <!-- ReAct cycle inside right lane -->
+  <rect class="box" x="865" y="470" width="495" height="145"/>
+  <text class="box-title" x="895" y="502">ReAct 循环</text>
+
+  <ellipse class="cycle" cx="975" cy="558" rx="58" ry="34"/>
+  <text class="box-title" x="975" y="564" text-anchor="middle">思考</text>
+
+  <ellipse class="cycle" cx="1113" cy="558" rx="58" ry="34"/>
+  <text class="box-title" x="1113" y="564" text-anchor="middle">行动</text>
+
+  <ellipse class="cycle" cx="1251" cy="558" rx="58" ry="34"/>
+  <text class="box-title" x="1251" y="564" text-anchor="middle">观察</text>
+
+  <path class="line" d="M 1033 558 L 1055 558"/>
+  <path class="line" d="M 1171 558 L 1193 558"/>
+  <path class="line" d="M 1251 592 C 1251 632, 975 632, 975 596"/>
+  <text class="purple-label" x="1113" y="650" text-anchor="middle">观察结果回到下一轮思考</text>
+
+  <!-- Base concrete agents in vertical lanes -->
+  <rect class="agent-base" x="95" y="515" width="185" height="76"/>
+  <text class="box-title" x="188" y="546" text-anchor="middle">Weather Agent</text>
+  <text class="box-text" x="188" y="570" text-anchor="middle">天气查询、日期筛选</text>
+
+  <rect class="agent-base" x="295" y="515" width="185" height="76"/>
+  <text class="box-title" x="388" y="546" text-anchor="middle">Transport Agent</text>
+  <text class="box-text" x="388" y="570" text-anchor="middle">按交通方式调用工具</text>
+
+  <rect class="agent-base" x="495" y="515" width="185" height="76"/>
+  <text class="box-title" x="588" y="546" text-anchor="middle">Planner Agent</text>
+  <text class="box-text" x="588" y="570" text-anchor="middle">结构化生成计划</text>
+
+  <path class="line-blue" d="M 388 445 L 188 515"/>
+  <path class="line-blue" d="M 388 445 L 388 515"/>
+  <path class="line-blue" d="M 388 445 L 588 515"/>
+  <text class="blue-label" x="388" y="488" text-anchor="middle">具体 Agent 使用基础能力</text>
+
+  <!-- Base tools aligned below agents -->
+  <rect class="tool" x="95" y="700" width="185" height="66"/>
+  <text class="box-title" x="188" y="740" text-anchor="middle">WeatherTool</text>
+
+  <rect class="tool" x="295" y="700" width="185" height="66"/>
+  <text class="box-title" x="388" y="740" text-anchor="middle">TransportTool</text>
+
+  <rect class="tool" x="495" y="700" width="185" height="66"/>
+  <text class="box-title" x="588" y="740" text-anchor="middle">LLM 结构化生成</text>
+
+  <path class="line-green" d="M 188 591 L 188 700"/>
+  <path class="line-green" d="M 388 591 L 388 700"/>
+  <path class="line-green" d="M 588 591 L 588 700"/>
+  <text class="green-label" x="188" y="664" text-anchor="middle">调用</text>
+  <text class="green-label" x="388" y="664" text-anchor="middle">调用</text>
+  <text class="green-label" x="588" y="664" text-anchor="middle">生成</text>
+
+  <!-- ReAct concrete agents in vertical lanes -->
+  <rect class="agent-react" x="820" y="700" width="185" height="76"/>
+  <text class="box-title" x="913" y="731" text-anchor="middle">POI Agent</text>
+  <text class="box-text" x="913" y="755" text-anchor="middle">多轮关键词搜索</text>
+
+  <rect class="agent-react" x="1030" y="700" width="185" height="76"/>
+  <text class="box-title" x="1123" y="731" text-anchor="middle">Hotel Agent</text>
+  <text class="box-text" x="1123" y="755" text-anchor="middle">分区域搜索酒店</text>
+
+  <rect class="agent-react" x="1240" y="700" width="185" height="76"/>
+  <text class="box-title" x="1333" y="731" text-anchor="middle">Budget Agent</text>
+  <text class="box-text" x="1333" y="755" text-anchor="middle">预算校验与反馈</text>
+
+  <path class="line-blue" d="M 1112 445 L 913 700"/>
+  <path class="line-blue" d="M 1112 445 L 1123 700"/>
+  <path class="line-blue" d="M 1112 445 L 1333 700"/>
+  <text class="blue-label" x="1130" y="675" text-anchor="middle">具体 Agent 使用 ReAct 循环</text>
+
+  <!-- ReAct tools aligned below agents -->
+  <rect class="tool" x="820" y="820" width="185" height="66"/>
+  <text class="box-title" x="913" y="860" text-anchor="middle">POITool</text>
+
+  <rect class="tool" x="1030" y="820" width="185" height="66"/>
+  <text class="box-title" x="1123" y="860" text-anchor="middle">HotelTool</text>
+
+  <rect class="tool" x="1240" y="820" width="185" height="66"/>
+  <text class="box-title" x="1333" y="860" text-anchor="middle">BudgetTool</text>
+
+  <path class="line-green" d="M 913 776 L 913 820"/>
+  <path class="line-green" d="M 1123 776 L 1123 820"/>
+  <path class="line-green" d="M 1333 776 L 1333 820"/>
+  <text class="green-label" x="913" y="807" text-anchor="middle">行动调用</text>
+  <text class="green-label" x="1123" y="807" text-anchor="middle">行动调用</text>
+  <text class="green-label" x="1333" y="807" text-anchor="middle">行动调用</text>
+
+  <!-- Observation lines are local and vertical -->
+  <path class="line-dash" d="M 913 820 L 913 776"/>
+  <path class="line-dash" d="M 1123 820 L 1123 776"/>
+  <path class="line-dash" d="M 1333 820 L 1333 776"/>
+  <text class="label" x="1123" y="905" text-anchor="middle">Tool 返回结果作为 ReActAgent 的观察输入</text>
+
+  <!-- Legend -->
+  <rect class="box" x="110" y="815" width="560" height="60"/>
+  <text class="small" x="135" y="840">图例：空心三角箭头表示继承；蓝色箭头表示具体 Agent 的类型归属；</text>
+  <text class="small" x="135" y="862">绿色箭头表示 Tool 调用；灰色虚线表示 TripState 读写或观察数据回传。</text>
+</svg>

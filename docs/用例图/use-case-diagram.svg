@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-labelledby="title desc">
+  <title id="title">个性化旅游规划系统用例图</title>
+  <desc id="desc">该 UML 用例图包含一个主要参与者用户，以及个性化旅游规划系统中的旅行信息填写、偏好设置、计划生成、进度查看、结果查看、地图信息、预算明细和历史计划等用例。</desc>
+  <defs>
+    <marker id="assocArrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10" fill="none" stroke="#334155" stroke-width="1.8"/>
+    </marker>
+    <marker id="depArrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10" fill="none" stroke="#64748b" stroke-width="1.8"/>
+    </marker>
+    <style>
+      .page { fill: #ffffff; }
+      .boundary { fill: #f8fafc; stroke: #1e293b; stroke-width: 2.4; }
+      .boundary-title { font: 700 28px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #0f172a; }
+      .actor-text { font: 700 22px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #0f172a; }
+      .usecase { fill: #ffffff; stroke: #2563eb; stroke-width: 2.2; }
+      .usecase.core { fill: #eff6ff; stroke: #1d4ed8; stroke-width: 2.8; }
+      .usecase.result { fill: #f0fdf4; stroke: #16a34a; }
+      .usecase-text { font: 600 18px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .line { stroke: #334155; stroke-width: 2; fill: none; }
+      .dep { stroke: #64748b; stroke-width: 1.8; stroke-dasharray: 8 6; fill: none; marker-end: url(#depArrow); }
+      .label { font: 600 15px Arial, "Microsoft YaHei", sans-serif; fill: #475569; text-anchor: middle; }
+      .note { font: 500 15px "Microsoft YaHei", "SimHei", Arial, sans-serif; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect class="page" width="1280" height="900"/>
+
+  <!-- Actor: 用户 -->
+  <g id="actor-user" transform="translate(120 385)">
+    <circle cx="0" cy="-95" r="24" fill="#ffffff" stroke="#0f172a" stroke-width="3"/>
+    <path d="M 0 -71 L 0 12" stroke="#0f172a" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M -54 -36 L 54 -36" stroke="#0f172a" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M 0 12 L -48 85" stroke="#0f172a" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M 0 12 L 48 85" stroke="#0f172a" stroke-width="3.2" stroke-linecap="round"/>
+    <text class="actor-text" x="0" y="122" text-anchor="middle">用户</text>
+  </g>
+
+  <!-- System boundary -->
+  <rect class="boundary" x="245" y="70" width="960" height="760" rx="12"/>
+  <text class="boundary-title" x="725" y="112" text-anchor="middle">个性化旅游规划系统</text>
+
+  <!-- Use cases -->
+  <g id="usecases">
+    <ellipse class="usecase" cx="490" cy="205" rx="135" ry="42"/>
+    <text class="usecase-text" x="490" y="205">填写旅行目的地和日期</text>
+
+    <ellipse class="usecase" cx="490" cy="315" rx="118" ry="42"/>
+    <text class="usecase-text" x="490" y="315">选择旅行偏好</text>
+
+    <ellipse class="usecase" cx="490" cy="425" rx="118" ry="42"/>
+    <text class="usecase-text" x="490" y="425">设置交通方式</text>
+
+    <ellipse class="usecase" cx="490" cy="535" rx="126" ry="42"/>
+    <text class="usecase-text" x="490" y="535">设置预算和人数</text>
+
+    <ellipse class="usecase core" cx="785" cy="370" rx="126" ry="48"/>
+    <text class="usecase-text" x="785" y="370">生成旅游计划</text>
+
+    <ellipse class="usecase" cx="785" cy="535" rx="118" ry="42"/>
+    <text class="usecase-text" x="785" y="535">查看生成进度</text>
+
+    <ellipse class="usecase result" cx="1030" cy="315" rx="118" ry="42"/>
+    <text class="usecase-text" x="1030" y="315">查看行程结果</text>
+
+    <ellipse class="usecase result" cx="1030" cy="445" rx="118" ry="42"/>
+    <text class="usecase-text" x="1030" y="445">查看地图信息</text>
+
+    <ellipse class="usecase result" cx="1030" cy="575" rx="118" ry="42"/>
+    <text class="usecase-text" x="1030" y="575">查看预算明细</text>
+
+    <ellipse class="usecase result" cx="785" cy="695" rx="118" ry="42"/>
+    <text class="usecase-text" x="785" y="695">查看历史计划</text>
+  </g>
+
+  <!-- Actor associations -->
+  <path class="line" d="M 174 300 C 245 260, 318 225, 358 210"/>
+  <path class="line" d="M 174 333 C 244 326, 310 319, 372 316"/>
+  <path class="line" d="M 174 371 C 246 389, 314 407, 373 420"/>
+  <path class="line" d="M 174 422 C 245 464, 314 505, 365 525"/>
+  <path class="line" d="M 174 382 C 330 373, 518 370, 659 370"/>
+  <path class="line" d="M 174 444 C 337 495, 558 529, 667 534"/>
+  <path class="line" d="M 174 360 C 390 324, 724 305, 912 313"/>
+  <path class="line" d="M 174 475 C 353 599, 574 673, 668 691"/>
+
+  <!-- Include relations: generating a trip plan uses the required input use cases -->
+  <path class="dep" d="M 685 341 C 627 308, 579 264, 535 239"/>
+  <text class="label" x="621" y="287">&lt;&lt;include&gt;&gt;</text>
+
+  <path class="dep" d="M 661 361 C 626 351, 596 341, 560 329"/>
+  <text class="label" x="614" y="354">&lt;&lt;include&gt;&gt;</text>
+
+  <path class="dep" d="M 666 390 C 626 398, 594 406, 559 417"/>
+  <text class="label" x="616" y="406">&lt;&lt;include&gt;&gt;</text>
+
+  <path class="dep" d="M 700 407 C 637 447, 585 489, 541 506"/>
+  <text class="label" x="632" y="468">&lt;&lt;include&gt;&gt;</text>
+
+  <!-- Extend relations: optional behavior during or after generation -->
+  <path class="dep" d="M 785 493 L 785 418"/>
+  <text class="label" x="843" y="462">&lt;&lt;extend&gt;&gt;</text>
+
+  <path class="dep" d="M 913 342 C 925 336, 936 331, 947 326"/>
+  <text class="label" x="929" y="350">&lt;&lt;extend&gt;&gt;</text>
+
+  <path class="dep" d="M 936 420 C 959 395, 984 367, 1003 355"/>
+  <text class="label" x="946" y="398">&lt;&lt;extend&gt;&gt;</text>
+
+  <path class="dep" d="M 949 546 C 919 508, 895 470, 879 415"/>
+  <text class="label" x="938" y="492">&lt;&lt;extend&gt;&gt;</text>
+
+  <path class="dep" d="M 849 659 C 898 621, 946 580, 1001 356"/>
+  <text class="label" x="916" y="624">&lt;&lt;extend&gt;&gt;</text>
+
+  <!-- Diagram note -->
+  <text class="note" x="267" y="805">说明：实线表示用户与用例的关联；虚线箭头表示用例之间的 include / extend 关系，箭头指向被包含或被扩展的用例。</text>
+</svg>
